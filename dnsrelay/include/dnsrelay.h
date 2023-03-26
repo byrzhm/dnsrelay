@@ -4,9 +4,21 @@
 
 #pragma once
 
-void dnsrelay_init(int argc, const char *argv[]);
 
 /**
+ * @function: void dnsrelay_init(int argc, const char *argv[])
+ * @brief: 中继服务器的初始化
+ * @param:
+ * 		argc: 命令行参数个数
+ * 		argv: 命令行参数数组
+*/
+void dnsrelay_init(int argc, const char *argv[]);
+
+
+
+/**
+ * @function: void parse_args(int argc, const char* argv[])
+ * @brief: 分析命令行参数
  * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
  * @param:
  * 		argc: 命令行参数个数

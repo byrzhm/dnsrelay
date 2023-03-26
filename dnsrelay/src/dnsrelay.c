@@ -6,18 +6,29 @@
 #include "../include/log.h"
 #include "../include/socket.h"
 #include "../include/config.h"
+#include "../include/tpool.h"
 #include <string.h>
 
 
+/**
+ * @function: void dnsrelay_init(int argc, const char *argv[])
+ * @brief: 中继服务器的初始化
+ * @param:
+ * 		argc: 命令行参数个数
+ * 		argv: 命令行参数数组
+*/
 void dnsrelay_init(int argc, const char *argv[])
 {
 	parse_args(argc, argv);
+	tpool_init();
 	sock_init();
 }
 
 
 
 /**
+ * @function: void parse_args(int argc, const char* argv[])
+ * @brief: 分析命令行参数
  * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
  * @param:
  * 		argc: 命令行参数个数

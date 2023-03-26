@@ -3,3 +3,5 @@
 */
 
 #pragma once
+
+void tpool_init();

@@ -3,6 +3,7 @@
 */
 
 #pragma once
+#include <Windows.h>
 
 typedef enum _debug_level
 {
@@ -13,4 +14,8 @@ typedef enum _debug_level
 
 void log_set_level(debug_level level);
 
-void log_error_handling(const char *message);
+void log_error_message(const char *message);
+
+void log_error_code(DWORD error_code);
+
+void log_error_code_wsa(int error_code);
