@@ -38,7 +38,9 @@ void sock_init()
         memset(&relay_addr, 0, sizeof(relay_addr));
         relay_addr.sin_family = AF_INET;
         // 9190 用来测试, 53 为 DNS 端口
-        relay_addr.sin_port = htons(9190);
+#ifdef _DEBUG
+        relay_addr.sin_port = htons(53);
+#endif
         relay_addr.sin_addr.s_addr = INADDR_ANY;
 
         if (bind(_relay_sock, (SOCKADDR*)&relay_addr, sizeof(relay_addr))

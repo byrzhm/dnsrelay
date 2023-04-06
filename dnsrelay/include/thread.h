@@ -23,6 +23,8 @@ typedef struct _PER_IO_DATA {
 
 HANDLE get_com_port();
 
+HANDLE get_mutex();
+
 void thread_init();
 
 unsigned WINAPI thread_main(LPVOID lpComPort);

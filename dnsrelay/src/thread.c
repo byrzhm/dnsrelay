@@ -4,10 +4,12 @@
 
 #include "thread.h"
 #include "socket.h"
+#include <stdio.h>
 #include <WinSock2.h>
 #include <windows.h>
 
 static HANDLE _com_port;        // * IO完成端口
+static HANDLE _mutex;
 
 /**
  * @return: _com_port
@@ -15,6 +17,14 @@ static HANDLE _com_port;        // * IO完成端口
 HANDLE get_com_port() 
 {
     return _com_port;
+}
+
+/**
+* @return: _mutex
+*/
+HANDLE get_mutex()
+{
+    return _mutex;
 }
 
 /**
@@ -37,6 +47,10 @@ void thread_init()
             _beginthreadex(NULL, 0, thread_main,
                          (LPVOID)_com_port, 0, NULL);
     }
+
+    _mutex = CreateMutex(NULL, FALSE, NULL);
+    if (_mutex == NULL)
+        log_error_message("thread_init(): CreateMutex()");
 }
 
 
@@ -80,7 +94,18 @@ unsigned WINAPI thread_main(LPVOID lpComPort)
         */
 
 #ifdef _DEBUG
-        send_packet_test(io_info->buffer, recv_bytes, &handle_info->sock_addr);
+        // send_packet_test(io_info->buffer, recv_bytes, &handle_info->sock_addr);
+        int count = 0;
+        WaitForSingleObject(_mutex, INFINITE);
+        printf("\n\n\n");
+        for (int i = 0; i < recv_bytes; i++) {
+            printf("%.2x ", ((unsigned char*)io_info->buffer)[i]);
+            ++count;
+            if (count % 16 == 0)
+                putc('\n', stdout);
+        }
+        printf("\n\n\n");
+        ReleaseMutex(_mutex);
 #endif
 
         free(handle_info);
