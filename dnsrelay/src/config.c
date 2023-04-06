@@ -2,7 +2,7 @@
 * todo: 配置文件相关
 */
 
-#include "../include/config.h"
+#include "config.h"
 #include <stdio.h>
 
 static FILE *_fp;

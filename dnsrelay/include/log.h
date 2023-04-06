@@ -1,8 +1,13 @@
+#pragma once
+
 /**
  * todo: 输出debug信息到命令行
 */
 
-#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum _debug_level
 {
@@ -13,4 +18,8 @@ typedef enum _debug_level
 
 void log_set_level(debug_level level);
 
-void log_error_handling(const char *message);
+void log_error_message(const char* message);
+
+#ifdef __cplusplus
+}
+#endif

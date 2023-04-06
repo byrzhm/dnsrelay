@@ -1,12 +1,26 @@
+#pragma once
+
 /**
  * todo: dnsrelay 接口, 程序主体部分
 */
 
-#pragma once
 
-void dnsrelay_init(int argc, const char *argv[]);
+#ifdef __cplucplus
+extern "C" {
+#endif
 
 /**
+ * @fn: 创建线程, 套接字, 读取配置文件
+ * @brief: 中继服务器的初始化
+ * @param:
+ * 		argc: 命令行参数个数
+ * 		argv: 命令行参数数组
+*/
+void dnsrelay_init(int argc, const char *argv[]);
+
+
+/**
+ * @brief: 分析命令行参数
  * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
  * @param:
  * 		argc: 命令行参数个数
@@ -18,3 +32,25 @@ void dnsrelay_init(int argc, const char *argv[]);
  * 		调用 config_set_filepath() 设置配置文件路径
 */
 void parse_args(int argc, const char* argv[]);
+
+
+
+/**
+ * 
+*/
+void parse_request();
+
+/**
+ * 
+*/
+void parse_response();
+
+/**
+ * 
+*/
+void main_loop();
+
+
+#ifdef __cplucplus
+}
+#endif

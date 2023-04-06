@@ -2,22 +2,36 @@
  * todo: dnsrelay 接口, 程序主体部分
 */
 
-#include "../include/dnsrelay.h"
-#include "../include/log.h"
-#include "../include/socket.h"
-#include "../include/config.h"
+#include "dnsrelay.h"
+#include "log.h"
+#include "socket.h"
+#include "config.h"
+#include "thread.h"
+#include "protocol.h"
 #include <string.h>
 
 
+/**
+ * @function: void dnsrelay_init(int argc, const char *argv[])
+ * @brief: 中继服务器的初始化
+ * @param:
+ * 		argc: 命令行参数个数
+ * 		argv: 命令行参数数组
+*/
 void dnsrelay_init(int argc, const char *argv[])
 {
 	parse_args(argc, argv);
+	thread_init();
 	sock_init();
+	/* config_init(); */
+	/* cache_init(); */
 }
 
 
 
 /**
+ * @function: void parse_args(int argc, const char* argv[])
+ * @brief: 分析命令行参数
  * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
  * @param:
  * 		argc: 命令行参数个数
@@ -41,8 +55,51 @@ void parse_args(int argc, const char* argv[])
 		log_set_level(DEBUG_LEVEL_0);
 
 	if (argc > 2)
-		sock_set_servaddr(argv[2]);
+		set_serv_addr(argv[2]);
 	
 	if (argc > 3)
 		config_set_filepath(argv[3]);
+}
+
+
+
+/**
+ * 
+*/
+void parse_request()
+{
+
+}
+
+
+
+/**
+ * 
+*/
+void parse_response()
+{
+
+}
+
+
+
+/**
+ * @fn: 程序主循环
+*/
+void main_loop()
+{
+	LPPER_HANDLE_DATA handle_info;
+	LPPER_IO_DATA io_info;
+
+	while(1) {
+		handle_info = (LPPER_HANDLE_DATA)malloc(sizeof(PER_HANDLE_DATA));
+		io_info = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+
+		if (!handle_info || !io_info)	// 检查内存分配情况
+			log_error_message("main_loop(): malloc()");
+		else {
+			// 接受DNS报文
+			recv_packet((void*)handle_info, (void*)io_info);
+		}
+	}
 }
