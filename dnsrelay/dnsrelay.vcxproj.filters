@@ -27,7 +27,7 @@
     <ClCompile Include="src\cache.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="src\tpool.c">
+    <ClCompile Include="src\thread.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="src\dnsrelay.c">
@@ -47,13 +47,16 @@
     <ClInclude Include="include\socket.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="include\tpool.h">
+    <ClInclude Include="include\thread.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\dnsrelay.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="include\config.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\protocol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
