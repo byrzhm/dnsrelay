@@ -1,6 +1,10 @@
 {
     "files.associations": {
         "*.dat": "code-text-binary",
-        "threadpoolapiset.h": "c"
+        "threadpoolapiset.h": "c",
+        "atomic": "c",
+        "cstdint": "c",
+        "protocol.h": "c",
+        "time.h": "c"
     }
 }
