@@ -8,7 +8,7 @@ extern "C" {
 #include <time.h>
 #include <WinSock2.h>
 
-#define ALPHABET_SIZE 27
+#define ALPHABET_SIZE 256
 
 // 关于时间的宏
 #define SEC_PER_DAY   60 * 60 * 24       
@@ -26,15 +26,6 @@ typedef enum
 	INNER, CONFIG, NORMAL
 } node_type;
 
-typedef struct _IP_List_Node {
-	struct _IP_List *next;
-#ifdef _WIN32
-	UINT32 ip_addr;
-#else
-	uint32_t ip_addr;
-#endif
-} IP_List_Node;
-
 /**
  * @brief 节点信息
  * @param start_time 节点被添加时的时间
@@ -46,24 +37,19 @@ typedef struct _IP_List_Node {
  * ! 函数的返回值指向该静态内存，所以inet_nota是不可重入的, 
  * ! 如果需要将返回值保存一定要使用strcpy复制。
 */
-typedef struct _node_info
-{
+typedef struct _IPListNode {
 	time_t start_time;
 	double time_to_live;
-	IP_List_Node *ip_list; // 一个域名可能对应多个IP
-} node_info;
+	struct _IPListNode *next;	// 一个域名可能对应多个IP
+#ifdef _WIN32
+	UINT32 ip_addr;
+#else
+	uint32_t ip_addr;
+#endif
+} IPListNode;
 
-
-/// @brief 字典树节点
-typedef struct _TrieNode
-{
-	node_type flag;
-	union
-	{
-		node_info ip_info;
-		struct _TrieNode *children[ALPHABET_SIZE];
-	};
-} TrieNode, *PtrTrieNode;
+// #define GET_INDEX(c) ((c == '.') ? 26 : ((c == '-') ? 27 : (c - 'a')))
+#define GET_INDEX(c) ((unsigned char)c)
 
 /**
  * @brief 创建字典树
@@ -75,14 +61,22 @@ void cache_init();
  * @param domain_name 域名			  [key]
  * @param ip_addr	  ip地址的数值形式 [value]
 */
-void cache_insert(const char* domain_name, uint32_t ip_addr);
+void cache_insert(const char* domain_name, UINT32 ip_addr);
 
 
 /**
  * @brief 查找一个叶子节点
  * @param domain_name 域名  [key]
+ * @param addr_list   返回包含IP信息的链表
 */
-void cache_search(const char* domain_name);
+void cache_search(const char* domain_name, IPListNode** addr_list);
+
+
+/**
+ * @brief  返回缓存的大小
+ * @return 缓存的大小    
+*/
+int cache_size();
 
 #ifdef __cplusplus
 }

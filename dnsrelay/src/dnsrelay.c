@@ -22,6 +22,7 @@
 */
 void dnsrelay_init(int argc, const char *argv[])
 {
+	// 顺序固定
 	parse_args(argc, argv);
 	thread_init();
 	sock_init();
@@ -67,7 +68,8 @@ void parse_args(int argc, const char* argv[])
 		config_set_filepath(argv[3]);
 	else
 		// 默认配置文件路径 "./dnsrelay.txt"
-		config_set_filepath("./dnsrelay.txt");
+		// config_set_filepath("./dnsrelay.txt");
+		config_set_filepath("./config/dnsrelay.txt");
 }
 
 

@@ -15,6 +15,9 @@ typedef unsigned __int32 uint32_t;
 // 域名的最大长度 255 + 1 '\0'
 #define MAX_DOMAIN_SIZE 256
 
+// IP字符串的最大长度
+#define MAX_IP_STR_SIZE 16
+
 typedef struct _PACKET_INFO {
     char domain_name[MAX_DOMAIN_SIZE];
     time_t current_time;

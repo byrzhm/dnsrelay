@@ -2,6 +2,10 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif
 
+#ifndef _CRT_SECURE_NO_WARNINGS
+#define _CRT_SECURE_NO_WARNINGS
+#endif
+
 #include "log.h"
 #include "socket.h"
 #include "thread.h"
@@ -24,12 +28,21 @@ static uint32_t _serv_ip_addr;
 //  "10.3.9.45"
 //  "10.3.9.44"
 
-/**
- * @brief 由DNS报文获得要查找的域名信息
- * @param packet       DNS报文
- * @param domain_name  域名信息
-*/
-static void get_domain_name(const char* packet, char *domain_name);
+
+
+static void get_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class);
+
+static void get_query_type(const char * ptr, unsigned short* type, unsigned short* class);
+
+static void generate_packet(
+    char* packet,
+    unsigned short id,
+    int* packet_size,
+    const char* domain_name,
+    IPListNode* ip_list
+);
+
+
 
 SOCKET get_relay_sock() {
     return _relay_sock;
@@ -238,6 +251,93 @@ void parse_packet(
 }
 
 
+/// @brief 生成DNS报文
+/// @param packet 报文字符串
+/// @param id     报文id
+/// @param packet_size 报文的长度
+/// @param domain_name 查找的域名
+/// @param ip_list ip链表
+static void generate_packet(
+    char* packet,
+    unsigned short id,
+    int* packet_size,
+    const char* domain_name,
+    IPListNode* ip_list
+)
+{
+    char *ptr;
+    char *str;
+    char temp_name[MAX_DOMAIN_SIZE];
+    BOOL invalid = TRUE;
+
+    if (ip_list->ip_addr == 0x0)
+        invalid = TRUE;
+    ptr = packet;
+    strcpy(temp_name, domain_name);
+
+    // id
+    *(unsigned short*)ptr = htons(id);      ptr += 2;
+
+    // flags
+    if (invalid)
+        *(unsigned short*)ptr = htons(0x8182);
+    else
+        *(unsigned short*)ptr = htons(0x8180);
+    ptr += 2;
+
+    // question_count
+    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
+
+    // answer_count
+    if (invalid)
+        *(unsigned short*)ptr = htons(0x0);
+    else
+        *(unsigned short*)ptr = htons(0x1);
+    ptr += 2;
+
+    // authority count
+    *(unsigned short*)ptr = htons(0x0);     ptr += 2;
+    
+    // additional count
+    *(unsigned short*)ptr = htons(0x0);     ptr += 2;
+    
+    // question section
+    // domain name
+    str = strtok(temp_name, ".");
+    while (str) {
+        unsigned char str_len = strlen(str) & 0xff;
+        *(unsigned char*)ptr++ = str_len;
+
+        strcpy(ptr, str);       ptr += str_len;
+
+        str = strtok(NULL, ".");
+    }
+    *(unsigned char*)ptr++ = 0x00;
+
+    // type
+    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
+    // class
+    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
+
+    if (!invalid) {
+        // answer section
+        // name, 使用偏移指针(见RFC1035: 4.1.4 message compression)
+        *(unsigned short*)ptr = htons(0xc00c);  ptr += 2;
+        // type, A = 1
+        *(unsigned short*)ptr = htons(0x1);     ptr += 2;
+        // class, IN = 1
+        *(unsigned short*)ptr = htons(0x1);     ptr += 2;
+        // time to live, 4 octets, 表示秒数, 这里设置成 192 秒
+        *(unsigned int*)ptr = htons(0xc0);      ptr += 4;
+        // data length,  2 octets, 4 为 IPv4, 16 为 IPv6
+        *(unsigned short*)ptr = htons(0x4);     ptr += 2;
+        // A Address
+        *(unsigned int*)ptr = htons(ip_list->ip_addr);  ptr += 4;
+    }
+
+    *packet_size = (int)(ptr - packet);
+}
+
 
 
 /**
@@ -259,10 +359,29 @@ void parse_query(
     char *packet_to_send;
     unsigned rand_id;
     unsigned short_max;
+    unsigned short type;
+    unsigned short class;
     unsigned short *ptr_id;
+    IPListNode* ip_list = NULL;
 
-    get_domain_name(packet, ptr_packet_info->domain_name);
-    // cache_search(ptr_packet_info->domain_name/*, */);
+    get_query_info(packet, ptr_packet_info->domain_name, &type, &class);
+
+    // 在cache中搜索, 对不良网站进行拦截
+    cache_search(ptr_packet_info->domain_name, &ip_list);
+    
+    if (ip_list != NULL) {
+        // 直接在 cache 中获取 ip 地址发送给客户端
+        int generate_size;
+        packet_to_send = (char *)malloc(sizeof(char) * packet_len);
+        if (packet_to_send == NULL)
+            log_error_message("parse_query(): malloc()");
+        else {
+            generate_packet(packet_to_send, ptr_dns_header->id, &generate_size, ptr_packet_info->domain_name, ip_list);
+            sendto(_relay_sock, packet_to_send, generate_size, 0,
+                (struct sockaddr*)sock_addr, sizeof(struct sockaddr_in));
+        }
+        return;
+    }
 
     short_max = 0xffff + 0x1;
     if (id_search(ptr_dns_header->id, 0, 0, NULL) != ID_ALREADY_EXIST)
@@ -331,8 +450,10 @@ void parse_response(
  * @brief 由DNS报文获得要查找的域名信息
  * @param packet       DNS报文
  * @param domain_name  域名信息
+ * @param type         type of the query
+ * @param class        class of the query
 */
-static void get_domain_name(const char* packet, char *domain_name)
+static void get_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class)
 {
     int i;
     int cursor;
@@ -348,7 +469,30 @@ static void get_domain_name(const char* packet, char *domain_name)
         size = *packet++;
     }
     domain_name[cursor - 1] = '\0';
+
+    get_query_type(packet, type, class);
 }
+
+
+
+
+
+/**
+* @brief 由DNS报文获得要查找的类型
+* @param ptr          指向DNS请求报文的qtype, qclass的指针
+* @param type         type of the query
+* @param class        class of the query
+*/
+static void get_query_type(const char * ptr, unsigned short* type, unsigned short* class)
+{
+    *type = ntohs(*(unsigned short*)ptr);
+    ptr += sizeof(unsigned short);
+    *class = ntohs(*(unsigned short*)ptr);
+    ptr += sizeof(unsigned short);
+}
+
+
+
 
 
 #ifdef _DEBUG
