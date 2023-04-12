@@ -24,6 +24,7 @@ static void build_id_list();
 
 
 /**
+ * @brief 提供接口
  * @return _com_port
 */
 HANDLE get_com_port() 
@@ -32,7 +33,8 @@ HANDLE get_com_port()
 }
 
 /**
-* @return _stdout_mutex
+ * @brief 提供接口
+ * @return _stdout_mutex
 */
 HANDLE get_stdout_mutex()
 {
@@ -41,11 +43,22 @@ HANDLE get_stdout_mutex()
 
 
 /**
-* @return _relay_sock_mutex
+ * @brief 提供接口
+ * @return _relay_sock_mutex
 */
 HANDLE get_relay_sock_mutex()
 {
     return _relay_sock_mutex;
+}
+
+
+/**
+ * @brief 提供接口
+ * @return _cache_mutex
+*/
+HANDLE get_cache_mutex()
+{
+    return _cache_mutex;
 }
 
 
