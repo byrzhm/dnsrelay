@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * todo: è¾“å‡ºdebugä¿¡æ¯åˆ°å‘½ä»¤è¡Œ
+ * Êä³ödebugĞÅÏ¢µ½ÃüÁîĞĞ
 */
 
 
@@ -10,49 +10,87 @@ extern "C" {
 #endif
 
 #include "protocol.h"
+#include <stdio.h>
 
 typedef enum _debug_level
 {
-    DEBUG_LEVEL_0, // * æ— è°ƒè¯•ä¿¡æ¯è¾“å‡º
-    DEBUG_LEVEL_1, // ? ä»…è¾“å‡ºæ—¶é—´åæ ‡, åºå·, å®¢æˆ·ç«¯IPåœ°å€, æŸ¥è¯¢çš„åŸŸå
-    DEBUG_LEVEL_2  // ! è¾“å‡ºå†—é•¿çš„è°ƒè¯•ä¿¡æ¯
+    DEBUG_LEVEL_0, // ÎŞµ÷ÊÔĞÅÏ¢Êä³ö
+    DEBUG_LEVEL_1, // ½öÊä³öÊ±¼ä×ø±ê, ĞòºÅ, ¿Í»§¶ËIPµØÖ·, ²éÑ¯µÄÓòÃû
+    DEBUG_LEVEL_2  // Êä³öÈß³¤µÄµ÷ÊÔĞÅÏ¢
 } debug_level;
 
-/**
- * @brief è®¾ç½®debugç­‰çº§
-*/
-void log_set_level(debug_level level);
+
 
 /**
- * @brief è¾“å‡ºå¹¶å¤„ç†è¿è¡Œæ—¶é”™è¯¯
+ * @brief ÉèÖÃdebugµÈ¼¶
+*/
+void log_set_db_level(debug_level level);
+
+/**
+ * @brief Êä³ö²¢´¦ÀíÔËĞĞÊ±´íÎó
 */
 void log_error_message(const char* message);
 
 /**
- * @brief å°†åŒ…çš„æ—¶é—´åæ ‡, åºå·, å®¢æˆ·ç«¯IPåœ°å€, æŸ¥è¯¢çš„åŸŸåè¾“å‡º
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö½ÓÊÜµ½µÄDNSÇëÇó±¨ÎÄĞÅÏ¢
+ * @param packet           DNS±¨ÎÄ
+ * @param packet_len       DNS±¨ÎÄ×Ö½ÚÊı
+ * @param sock_addr        DNS±¨ÎÄ·¢ËÍ·½µÄÌ×½Ó×ÖµØÖ·
+ * @param ptr_packet_info  ±¨ÎÄĞÅÏ¢
+ * @param ptr_dns_header   DNSÍ·²¿ĞÅÏ¢
 */
-void log_packet_brief_info();
-
-/**
- * @brief è¾“å‡ºåŒ…çš„è¯¦ç»†ä¿¡æ¯
- * @param packet           DNSæŠ¥æ–‡
- * @param packet_len       DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param ptr_packet_info  æŠ¥æ–‡ä¿¡æ¯
- * @param ptr_dns_header   DNSå¤´éƒ¨ä¿¡æ¯
-*/
-void log_packet_detailed_info(
-    const char *packet,
+void log_received_query_packet(
+    const char* packet,
     int packet_len,
+    struct sockaddr_in* sock_addr,
     PACKET_INFO* ptr_packet_info,
     DNS_HEADER* ptr_dns_header
 );
 
 /**
- * @brief ä¸åŠ ä»»ä½•è§£æ, ä»¥åå…­è¿›åˆ¶ä¸å­—ç¬¦å½¢å¼æ˜¾ç¤ºåŒ…çš„äºŒè¿›åˆ¶ä¿¡æ¯
- * @param packet     æŒ‡å‘æŠ¥æ–‡çš„å­—ç¬¦æŒ‡é’ˆ
- * @param packet_len æŠ¥æ–‡æ€»å…±çš„å­—èŠ‚æ•°
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö½ÓÊÜµ½µÄDNSÓ¦´ğ±¨ÎÄĞÅÏ¢
+ * @param packet           DNS±¨ÎÄ
+ * @param packet_len       DNS±¨ÎÄ×Ö½ÚÊı
+ * @param client_addr      DNS¿Í»§¶ËµÄÌ×½Ó×ÖµØÖ·
+ * @param serv_addr        DNSÍâ²¿·şÎñÆ÷µÄÌ×½Ó×ÖµØÖ·
+ * @param ptr_dns_header   DNSÍ·²¿ĞÅÏ¢
+ * @param origin_id        ×ª»»Ç°µÄID
 */
-void log_packet_raw(const char *packet, int packet_len);
+void log_received_response_packet(
+    const char* packet,
+    int packet_len, 
+    struct sockaddr_in * client_addr,
+    struct sockaddr_in * serv_addr,
+    DNS_HEADER* ptr_dns_header,
+    unsigned short origin_id
+);
+
+/**
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö·¢ËÍµÄDNS±¨ÎÄĞÅÏ¢
+ * @param to_addr           Ä¿µÄµØµÄÌ×½Ó×ÖµØÖ·
+ * @param send_bytes        ·¢ËÍµÄ×Ö½ÚÊı
+ * @param old_id            ¾ÉµÄID
+ * @param new_id            ×ª»»ºóµÄĞÂID
+*/
+void log_packet_sent(struct sockaddr_in* to_addr, int send_bytes, unsigned short old_id, unsigned short new_id);
+
+/**
+* @brief Êä³öÅäÖÃĞÅÏ¢
+* @param ip_str IP×Ö·û´®
+* @param name   ÓòÃû
+*/
+void log_config_info(int line_cnt, const char* ip_str, const char* name);
+
+
+/**
+* @brief Êä³ö³ÌĞò°æ±¾ĞÅÏ¢ÓëÓÃ·¨
+*/
+static void inline log_hello_info()
+{
+    printf("DNSRELAY, Version 0.1, Build: " __DATE__ " " __TIME__ "\n");
+    printf("Usage: dnsrelay [-d | -dd] [<dns-server>] [<db-file>]\n\n");
+}
+
 
 #ifdef __cplusplus
 }

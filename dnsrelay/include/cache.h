@@ -4,22 +4,25 @@
 extern "C" {
 #endif
 
+#include "common.h"
 #include "protocol.h"
+
 #include <time.h>
 #include <WinSock2.h>
 
-#define ALPHABET_SIZE 256
+#define ALPHABET_SIZE 66
 
-// å…³äºæ—¶é—´çš„å®
-#define SEC_PER_DAY   60 * 60 * 24       
-#define TTL 		  2 * SEC_PER_DAY
-#define INFINITE_TTL  -1
+// ¹ØÓÚÊ±¼äµÄºê
+#define SEC_PER_DAY   60 * 60 * 24
+#define SEC_PER_MIN   60
+#define TTL 		  2 * SEC_PER_MIN
+#define INFINITE_TTL  3 * 365 * SEC_PER_DAY
 
 /**
- * @brief èŠ‚ç‚¹ç§ç±»
- * @param INNER  å†…éƒ¨èŠ‚ç‚¹
- * @param CONFIG ä»é…ç½®æ–‡ä»¶ä¸­è¯»å–çš„å¶å­èŠ‚ç‚¹, ä¸å¯åˆ é™¤
- * @param NORMAL ç¨‹åºæ­£å¸¸è¿è¡Œè¿‡ç¨‹ä¸­äº§ç”Ÿçš„æ­£å¸¸çš„å¶å­ç»“ç‚¹, å¯ä»¥åˆ é™¤
+ * @brief ½ÚµãÖÖÀà
+ * @param INNER  ÄÚ²¿½Úµã
+ * @param CONFIG ´ÓÅäÖÃÎÄ¼şÖĞ¶ÁÈ¡µÄÒ¶×Ó½Úµã, ²»¿ÉÉ¾³ı
+ * @param NORMAL ³ÌĞòÕı³£ÔËĞĞ¹ı³ÌÖĞ²úÉúµÄÕı³£µÄÒ¶×Ó½áµã, ¿ÉÒÔÉ¾³ı
 */
 typedef enum
 {
@@ -27,56 +30,49 @@ typedef enum
 } node_type;
 
 /**
- * @brief èŠ‚ç‚¹ä¿¡æ¯
- * @param start_time èŠ‚ç‚¹è¢«æ·»åŠ æ—¶çš„æ—¶é—´
- * @param time_to_live èŠ‚ç‚¹çš„ç”Ÿå­˜æ—¶æœŸ
- * ! ä½¿ç”¨ cache_search æŸ¥è¯¢åˆ°èŠ‚ç‚¹æ—¶, å¦‚æœè¯¥èŠ‚ç‚¹çš„èŠ‚ç‚¹ç±»å‹ä¸ºNORMAL,
- * ! é‚£ä¹ˆå°±è®¡ç®—å½“å‰æ—¶é—´ä¸start_timeçš„å·®å€¼, å¦‚æœå·®å€¼å¤§äºtime_to_liveåˆ™åˆ é™¤è¯¥èŠ‚ç‚¹
- * @param ip_addr ipçš„æ•°å€¼è¡¨ç¤º, å¯ä»¥é€šè¿‡è°ƒç”¨ inet_ntoa(ip_addr) è·å¾—ipå­—ç¬¦ä¸² 
- * ! inet_notaå‡½æ•°å†…éƒ¨ä½¿ç”¨äº†ä¸€ä¸ªé™æ€å˜é‡å­˜å‚¨è½¬åŒ–ç»“æœï¼Œ
- * ! å‡½æ•°çš„è¿”å›å€¼æŒ‡å‘è¯¥é™æ€å†…å­˜ï¼Œæ‰€ä»¥inet_notaæ˜¯ä¸å¯é‡å…¥çš„, 
- * ! å¦‚æœéœ€è¦å°†è¿”å›å€¼ä¿å­˜ä¸€å®šè¦ä½¿ç”¨strcpyå¤åˆ¶ã€‚
+ * @brief ½ÚµãĞÅÏ¢
+ * @param start_time ½Úµã±»Ìí¼ÓÊ±µÄÊ±¼ä
+ * @param time_to_live ½ÚµãµÄÉú´æÊ±ÆÚ
+ * ! Ê¹ÓÃ cache_search ²éÑ¯µ½½ÚµãÊ±, Èç¹û¸Ã½ÚµãµÄ½ÚµãÀàĞÍÎªNORMAL,
+ * ! ÄÇÃ´¾Í¼ÆËãµ±Ç°Ê±¼äÓëstart_timeµÄ²îÖµ, Èç¹û²îÖµ´óÓÚtime_to_liveÔòÉ¾³ı¸Ã½Úµã
+ * @param ip_addr ipµÄÊıÖµ±íÊ¾, ¿ÉÒÔÍ¨¹ıµ÷ÓÃ inet_ntoa(ip_addr) »ñµÃip×Ö·û´® 
+ * ! inet_notaº¯ÊıÄÚ²¿Ê¹ÓÃÁËÒ»¸ö¾²Ì¬±äÁ¿´æ´¢×ª»¯½á¹û£¬
+ * ! º¯ÊıµÄ·µ»ØÖµÖ¸Ïò¸Ã¾²Ì¬ÄÚ´æ£¬ËùÒÔinet_notaÊÇ²»¿ÉÖØÈëµÄ, 
+ * ! Èç¹ûĞèÒª½«·µ»ØÖµ±£´æÒ»¶¨ÒªÊ¹ÓÃstrcpy¸´ÖÆ¡£
 */
 typedef struct _IPListNode {
 	time_t start_time;
 	double time_to_live;
-	struct _IPListNode *next;	// ä¸€ä¸ªåŸŸåå¯èƒ½å¯¹åº”å¤šä¸ªIP
-#ifdef _WIN32
-	UINT32 ip_addr;
-#else
+	struct _IPListNode* next;	// Ò»¸öÓòÃû¿ÉÄÜ¶ÔÓ¦¶à¸öIP
 	uint32_t ip_addr;
-#endif
 } IPListNode;
 
-// #define GET_INDEX(c) ((c == '.') ? 26 : ((c == '-') ? 27 : (c - 'a')))
-#define GET_INDEX(c) ((unsigned char)c)
-
 /**
- * @brief åˆ›å»ºå­—å…¸æ ‘
+ * @brief ´´½¨×ÖµäÊ÷
 */
 void cache_init();
 
 /**
- * @brief æ’å…¥ä¸€ä¸ªå¶å­èŠ‚ç‚¹
- * @param domain_name åŸŸå			  [key]
- * @param ip_addr	  ipåœ°å€çš„æ•°å€¼å½¢å¼ [value]
+ * @brief ²åÈëÒ»¸öÒ¶×Ó½Úµã
+ * @param domain_name ÓòÃû			   [key]
+ * @param ip_addr	  ipµØÖ·µÄÊıÖµĞÎÊ½ [value]
 */
-void cache_insert(const char* domain_name, UINT32 ip_addr);
+void cache_insert(const char* domain_name, uint32_t ip_addr);
 
 
 /**
- * @brief æŸ¥æ‰¾ä¸€ä¸ªå¶å­èŠ‚ç‚¹
- * @param domain_name åŸŸå  [key]
- * @param addr_list   è¿”å›åŒ…å«IPä¿¡æ¯çš„é“¾è¡¨
+ * @brief ²éÕÒÒ»¸öÒ¶×Ó½Úµã
+ * @param domain_name ÓòÃû  [key]
+ * @param addr_list   ·µ»Ø°üº¬IPĞÅÏ¢µÄÁ´±í
 */
 void cache_search(const char* domain_name, IPListNode** addr_list);
 
 
 /**
- * @brief  è¿”å›ç¼“å­˜çš„å¤§å°
- * @return ç¼“å­˜çš„å¤§å°    
+ * @brief  ·µ»Ø»º´æËùÕ¼µÄÄÚ´æ´óĞ¡
+ * @return »º´æËùÕ¼µÄÄÚ´æ´óĞ¡
 */
-int cache_size();
+int cache_memory_size();
 
 #ifdef __cplusplus
 }

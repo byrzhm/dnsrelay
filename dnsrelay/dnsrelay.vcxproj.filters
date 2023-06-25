@@ -59,5 +59,8 @@
     <ClInclude Include="include\protocol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="include\common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

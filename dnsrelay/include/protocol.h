@@ -12,21 +12,21 @@ typedef unsigned __int32 uint32_t;
 #include <Windows.h>
 #include <time.h>
 
-// åŸŸåçš„æœ€å¤§é•¿åº¦ 255 + 1 '\0'
+// ÓòÃûµÄ×î´ó³¤¶È 255 + 1 '\0'
 #define MAX_DOMAIN_SIZE 256
 
-// IPå­—ç¬¦ä¸²çš„æœ€å¤§é•¿åº¦
+// IP×Ö·û´®µÄ×î´ó³¤¶È
 #define MAX_IP_STR_SIZE 16
+
+// DNS±¨ÎÄµÄ×î´ó³¤¶È
+#define MAX_DNS_PKT_SIZE 512
 
 typedef struct _PACKET_INFO {
     char domain_name[MAX_DOMAIN_SIZE];
     time_t current_time;
-#ifdef _WIN32
-    UINT32 ip_addr;
-#else
     uint32_t ip_addr;
-#endif
-    unsigned short id;
+    unsigned short type;
+    unsigned short class;
 } PACKET_INFO;
 
 

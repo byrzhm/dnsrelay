@@ -1,5 +1,5 @@
 /**
- * todo: dnsrelay æ¥å£, ç¨‹åºä¸»ä½“éƒ¨åˆ†
+ * dnsrelay ½Ó¿Ú, ³ÌĞòÖ÷Ìå²¿·Ö
 */
 
 #include "dnsrelay.h"
@@ -8,91 +8,157 @@
 #include "config.h"
 #include "thread.h"
 #include "protocol.h"
-#include <string.h>
+#include "cache.h"
+#include "common.h"
+
 #include <time.h>
-#include <stdlib.h>
 #include <WinSock2.h>
 #include <Windows.h>
 
+static inline void parse_args(int argc, const char* argv[]);
+static inline void set_serv_ip(int argc, const char* argv[]);
+static inline void set_db_level(int argc, const char* argv[]);
+static inline void set_filepath(int argc, const char* argv[]);
+static inline bool is_digit(char chr);
+
 
 /**
- * @brief ä¸­ç»§æœåŠ¡å™¨çš„åˆå§‹åŒ–
- * @param argc å‘½ä»¤è¡Œå‚æ•°ä¸ªæ•°
- * @param argv å‘½ä»¤è¡Œå‚æ•°æ•°ç»„
+ * @brief ÖĞ¼Ì·şÎñÆ÷µÄ³õÊ¼»¯
+ * @param argc ÃüÁîĞĞ²ÎÊı¸öÊı
+ * @param argv ÃüÁîĞĞ²ÎÊıÊı×é
 */
 void dnsrelay_init(int argc, const char *argv[])
 {
-	// é¡ºåºå›ºå®š
-	parse_args(argc, argv);
-	thread_init();
-	sock_init();
-	cache_init(); 
-	config_init();
+	srand((unsigned)time(NULL));
+	parse_args(argc, argv); // ´¦ÀíÃüÁîĞĞ²ÎÊı
+	thread_init();          // ³õÊ¼»¯Ïß³Ì×ÊÔ´
+	sock_init();            // ³õÊ¼»¯Ì×½Ó×ÖĞÅÏ¢
+	cache_init();           // ³õÊ¼»¯cache
+	config_init();          // ³õÊ¼»¯ÅäÖÃĞÅÏ¢
 }
 
 
-
 /**
- * @brief åˆ†æå‘½ä»¤è¡Œå‚æ•°
- * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
- * 
- * @param argc å‘½ä»¤è¡Œå‚æ•°ä¸ªæ•°
- * @param argv å‘½ä»¤è¡Œå‚æ•°æ•°ç»„
- * 
- * å¦‚æœæœ‰å¯¹åº”çš„å‘½ä»¤è¡Œå‚æ•°ä¿¡æ¯
- * è°ƒç”¨ log_set_level() è®¾ç½®debugç­‰çº§
- * è°ƒç”¨ sock_set_servaddr() è®¾ç½®å¤–éƒ¨DNSæœåŠ¡å™¨çš„sockaddrä¿¡æ¯
- * è°ƒç”¨ config_set_filepath() è®¾ç½®é…ç½®æ–‡ä»¶è·¯å¾„
-*/
-void parse_args(int argc, const char* argv[])
-{
-	if (argc > 1) {
-		// è®¾ç½®debugç­‰çº§
-		if (strcmp(argv[1], "-dd") == 0)
-			log_set_level(DEBUG_LEVEL_2);
-		else if (strcmp(argv[1], "-d") == 0)
-			log_set_level(DEBUG_LEVEL_1);
-		else
-			log_set_level(DEBUG_LEVEL_0);
-	}
-
-	// è®¾ç½®å¤–éƒ¨DNSæœåŠ¡å™¨åœ°å€
-	if (argc > 2)
-		set_serv_addr(argv[2]);
-	else
-		// é»˜è®¤å¤–éƒ¨DNSæœåŠ¡å™¨åœ°å€ "10.3.9.45", "10.3.9.44"
-		set_serv_addr("10.3.9.44");	
-	
-	// è®¾ç½®é…ç½®æ–‡ä»¶è·¯å¾„
-	if (argc > 3)
-		config_set_filepath(argv[3]);
-	else
-		// é»˜è®¤é…ç½®æ–‡ä»¶è·¯å¾„ "./dnsrelay.txt"
-		// config_set_filepath("./dnsrelay.txt");
-		config_set_filepath("./config/dnsrelay.txt");
-}
-
-
-
-
-/**
- * @brief ç¨‹åºä¸»å¾ªç¯
+ * @brief ³ÌĞòÖ÷Ñ­»·
 */
 void main_loop()
 {
 	LPPER_HANDLE_DATA handle_info;
 	LPPER_IO_DATA io_info;
 
-	while(1) {
-		handle_info = (LPPER_HANDLE_DATA)malloc(sizeof(PER_HANDLE_DATA));
-		io_info = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
+	for (;;) {
+		handle_info = (LPPER_HANDLE_DATA)Malloc(sizeof(PER_HANDLE_DATA));
+		io_info = (LPPER_IO_DATA)Malloc(sizeof(PER_IO_DATA));
 
-		// æ£€æŸ¥å†…å­˜åˆ†é…æƒ…å†µ
-		if (!handle_info || !io_info)	
-			log_error_message("main_loop(): malloc()");
+		// ½ÓÊÜDNS±¨ÎÄ
+		recv_packet((void*)handle_info, (void*)io_info, get_relay_sock());
+	}
+}
+
+
+
+/**
+ * @brief ·ÖÎöÃüÁîĞĞ²ÎÊı
+ * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
+ *
+ * @param argc ÃüÁîĞĞ²ÎÊı¸öÊı
+ * @param argv ÃüÁîĞĞ²ÎÊıÊı×é
+ *
+ * Èç¹ûÓĞ¶ÔÓ¦µÄÃüÁîĞĞ²ÎÊıĞÅÏ¢
+ * µ÷ÓÃ log_set_level() ÉèÖÃdebugµÈ¼¶
+ * µ÷ÓÃ sock_set_serv_ip() ÉèÖÃÍâ²¿DNS·şÎñÆ÷µÄipĞÅÏ¢
+ * µ÷ÓÃ config_set_filepath() ÉèÖÃÅäÖÃÎÄ¼şÂ·¾¶
+*/
+static inline void parse_args(int argc, const char* argv[])
+{
+	set_serv_ip(argc, argv);
+	set_db_level(argc, argv);
+	set_filepath(argc, argv);
+}
+
+
+/**
+* @brief ÉèÖÃdebugµÈ¼¶
+* @param argc ÃüÁîĞĞ²ÎÊı¸öÊı
+* @param argv ÃüÁîĞĞ²ÎÊıÊı×é
+*/
+static inline void set_db_level(int argc, const char* argv[])
+{
+	debug_level level = DEBUG_LEVEL_0;
+
+	if (argc > 1) {
+		if (!strcmp(argv[1], "-d"))
+			level = DEBUG_LEVEL_1;
+		else if (!strcmp(argv[1], "-dd"))
+			level = DEBUG_LEVEL_2;
 		else {
-			// æ¥å—DNSæŠ¥æ–‡
-			recv_packet((void*)handle_info, (void*)io_info, get_relay_sock());
+			printf("Usage error!\n");
+			exit(1);
 		}
 	}
+
+	log_set_db_level(level);
+	printf("Debug level %d.\n", (int)level);
+}
+
+
+/**
+* @brief ÉèÖÃÍâ²¿DNS·şÎñÆ÷µØÖ·
+* @param argc ÃüÁîĞĞ²ÎÊı¸öÊı
+* @param argv ÃüÁîĞĞ²ÎÊıÊı×é
+*/
+static void inline set_serv_ip(int argc, const char* argv[])
+{
+	char chr;
+	char default_serv_ip[] = "10.3.9.44";
+	int dot_cnt = 0;
+	bool no_digit = false;
+
+	if (argc > 2) {
+		for (int i = 0; argv[2][i] != '\0'; i++) {
+			chr = argv[2][i];
+			if (chr == '.')
+				dot_cnt++;
+			else if (!is_digit(chr)) {
+				no_digit = true;
+				break;
+			}
+		}
+
+		if (dot_cnt == 3 && !no_digit) {
+			sock_set_serv_ip(argv[2]);
+			printf("Name server %s:53.\n", argv[2]);
+		}
+		else {
+			printf("Usage error!\n");
+			exit(1);
+		}
+	}
+	else {
+		// Ã»ÓĞÔÚÃüÁîĞĞÖĞÉèÖÃÍâ²¿DNS·şÎñÆ÷µØÖ·, Ê¹ÓÃÄ¬ÈÏÍâ²¿DNS·şÎñÆ÷µØÖ·
+		// Ä¬ÈÏÍâ²¿DNS·şÎñÆ÷µØÖ·: "10.3.9.45", "10.3.9.44"
+		sock_set_serv_ip(default_serv_ip);
+		printf("Name server %s:53.\n", default_serv_ip);
+	}
+}
+
+
+
+
+
+/**
+* @brief ÉèÖÃÅäÖÃÎÄ¼şÂ·¾¶
+*/
+static inline void set_filepath(int argc, const char* argv[])
+{
+	if (argc > 3)
+		config_set_filepath(argv[3]);
+	else
+#ifdef _DEBUG
+		// debugÄ£Ê½ÏÂÄ¬ÈÏÅäÖÃÎÄ¼şÂ·¾¶ "./config/dnsrelay.txt"
+		config_set_filepath("./config/dnsrelay.txt");
+#else
+		// releaseÄ£Ê½ÏÂÄ¬ÈÏÅäÖÃÎÄ¼şÂ·¾¶ "./config/dnsrelay.txt"
+		config_set_filepath("./dnsrelay.txt");
+#endif
 }

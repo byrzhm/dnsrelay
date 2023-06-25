@@ -5,12 +5,12 @@ extern "C" {
 #endif
 
 /**
- * @brief è®¾ç½®é…ç½®æ–‡ä»¶çš„è·¯å¾„
+ * @brief ÉèÖÃÅäÖÃÎÄ¼şµÄÂ·¾¶
 */
 void config_set_filepath(const char* filepath);
 
 /**
- * @brief åŠ è½½é…ç½®æ–‡ä»¶ä¿¡æ¯åˆ°cache
+ * @brief ¼ÓÔØÅäÖÃÎÄ¼şĞÅÏ¢µ½cache
 */
 void config_init();
 

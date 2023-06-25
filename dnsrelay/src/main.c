@@ -1,14 +1,13 @@
-/**
- * ! main
-*/
 #include "dnsrelay.h"
-
+#include "log.h"
 
 int main(int argc, const char* argv[])
 {
+	log_hello_info();
+
 	dnsrelay_init(argc, argv);
 
-	// ç¨‹åºä¸»å¾ªç¯
+	// ³ÌĞòÖ÷Ñ­»·
 	main_loop();
 
 	return 0;

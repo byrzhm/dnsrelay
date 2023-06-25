@@ -11,6 +11,8 @@
 #include "thread.h"
 #include "cache.h"
 #include "protocol.h"
+#include "common.h"
+
 #include <Windows.h>
 #include <winsock2.h>
 #include <string.h>
@@ -19,28 +21,48 @@
 
 
 static SOCKET _relay_sock;
-static SOCKADDR_IN _serv_addr;
-#ifdef _WIN32
-static UINT32 _serv_ip_addr;
-#else
+static struct sockaddr_in _serv_addr;
 static uint32_t _serv_ip_addr;
-#endif
 //  "10.3.9.45"
 //  "10.3.9.44"
 
-
-
-static void get_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class);
-
-static void get_query_type(const char * ptr, unsigned short* type, unsigned short* class);
-
-static void generate_packet(
-    char* packet,
-    unsigned short id,
-    int* packet_size,
-    const char* domain_name,
-    IPListNode* ip_list
+static inline void get_header_info(
+    const char* packet,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
 );
+static inline void parse_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class);
+static inline void get_query_name(char** dptr, char* domain_name);
+static inline void get_query_type(const char* ptr, unsigned short* type, unsigned short* class);
+static inline void parse_response_info(const char* packet, int packet_len);
+static inline void generate_packet(
+    unsigned short id,
+    IPListNode* ip_list,
+    const char* domain_name,
+    char* packet,
+    int* packet_size
+);
+static inline void get_ans_cnt(IPListNode* ip_list, unsigned short* ptr_ans_cnt);
+static inline void generate_dns_header(char** dptr, unsigned short id, unsigned short ans_cnt);
+static inline void generate_answer_section(char** dptr, IPListNode* ip_list, unsigned short ans_cnt);
+static inline void generate_question_section(char** dptr, const char* domain_name);
+static inline void parse_query(
+    const char* packet,
+    int packet_len,
+    struct sockaddr_in* sock_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+);
+static inline void parse_response(
+    const char* packet,
+    int packet_len,
+    struct sockaddr_in* serv_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+);
+static inline void get_ip_in_answer(const char* ptr, int remain_len, const char* domain_name);
+static inline void relay_packet(const char* packet, int send_len, SOCKADDR_IN* ptr_to_addr);
+
 
 
 
@@ -48,31 +70,35 @@ SOCKET get_relay_sock() {
     return _relay_sock;
 }
 
-void set_serv_addr(const char* serv_ip){
+void sock_set_serv_ip(const char* serv_ip){
     _serv_ip_addr = inet_addr(serv_ip);
 }
 
 void sock_init()
 {
-    WSADATA wsaData;
-    SOCKADDR_IN relay_addr;
+    struct sockaddr_in relay_addr;
 
+#ifdef _WIN32
+    WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
         log_error_message("sock_init(): WSAStartup()");
+#endif
 
     _relay_sock = socket(AF_INET, SOCK_DGRAM, 0);
     if (_relay_sock == INVALID_SOCKET)
         log_error_message("sock_init(): socket()");
-    else {
+    else
+    {
         memset(&relay_addr, 0, sizeof(relay_addr));
         relay_addr.sin_family = AF_INET;
-        // 53å·ç«¯å£ ä¸º DNS ç«¯å£
-        relay_addr.sin_port = htons(53);
+        relay_addr.sin_port = htons(53); // 53ºÅ¶Ë¿Ú Îª DNS ¶Ë¿Ú
         relay_addr.sin_addr.s_addr = INADDR_ANY;
 
-        if (bind(_relay_sock, (SOCKADDR*)&relay_addr, sizeof(relay_addr))
+        if (bind(_relay_sock, (struct sockaddr*)&relay_addr, sizeof(relay_addr))
                  == INVALID_SOCKET)
             log_error_message("sock_init(): bind()");
+
+        printf("Bind UDP port 53 ...OK\n");
     }
 
     _serv_addr.sin_family = AF_INET;
@@ -81,7 +107,14 @@ void sock_init()
 }
 
 
-
+/**
+ * @brief µ÷ÓÃrecvfrom½ÓÊÜ·¢À´µÄDNS±¨ÎÄ,
+ *        µ÷ÓÃPostQueuedCompletionStatus()»½ĞÑÏß³Ì´¦ÀíDNS±¨ÎÄ
+ * @param handle_ptr ÒÑ¾­·ÖÅäºÃ¿Õ¼äµÄÖ¸ÏòPER_HANDLE_DATAµÄÖ¸Õë
+ * @param io_ptr     ÒÑ¾­·ÖÅäºÃ¿Õ¼äµÄÖ¸ÏòPER_IO_DATAµÄÖ¸Õë
+ * ! [×¢Òâ] io_ptr->overlapped ÔÚ´«ÈëÇ°±ØĞëÖÃÁã
+ * @param recv_sock  ½ÓÊÜ±¨ÎÄµÄÌ×½Ó×ÖĞÅÏ¢
+*/
 void recv_packet(void* handle_ptr, void* io_ptr, SOCKET recv_sock) 
 {
 	int recv_bytes;
@@ -91,30 +124,17 @@ void recv_packet(void* handle_ptr, void* io_ptr, SOCKET recv_sock)
 
 	memset(&io_info->overlapped, 0, sizeof(OVERLAPPED));
 
-
     if (recv_sock == _relay_sock) {
-        // WaitForSingleObject(get_relay_sock_mutex(), INFINITE);
+        // ½ÓÊÜÀ´×ÔDNS¿Í»§¶ËµÄÇëÇó±¨ÎÄ
         recv_bytes = recvfrom(recv_sock, io_info->buffer,
             BUF_SIZE, 0, (SOCKADDR*)&handle_info->sock_addr, &addr_size);
-#ifdef _DEBUG
-        // assert(recv_bytes > 0);
-#endif
-
-        // ReleaseMutex(get_relay_sock_mutex);
     }
     else {
         recv_bytes = recv(recv_sock, io_info->buffer, BUF_SIZE, 0);
         handle_info->sock_addr = _serv_addr;
-#ifdef _DEBUG
-        assert(recv_bytes > 0);
-#endif
     }
 
-    if (recv_bytes == SOCKET_ERROR) {
-		//log_error_message("recv_packet(): recvfrom()");
-        ;
-    }
-	else {
+    if (recv_bytes != SOCKET_ERROR) {
 		PostQueuedCompletionStatus(
 			get_com_port(), recv_bytes,
 			(ULONG_PTR)handle_info, (LPOVERLAPPED)&io_info->overlapped
@@ -123,73 +143,482 @@ void recv_packet(void* handle_ptr, void* io_ptr, SOCKET recv_sock)
 }
 
 
+/**
+ * @brief ·ÖÎö·¢À´µÄDNS±¨ÎÄ
+ * @param  packet            ½ÓÊÜµÄDNS±¨ÎÄ
+ * @param  packet_len        ½ÓÊÜµÄDNS±¨ÎÄ×Ö½ÚÊı
+ * @param  sock_addr         ±¨ÎÄ·¢ËÍ·½µÄÌ×½Ó×ÖµØÖ·
+ * @param  ptr_packet_info   Ö¸Ïò±¨ÎÄĞÅÏ¢µÄÖ¸Õë    [Ö¸Õë·µ»Ø]
+ * @param  ptr_dns_header    Ö¸ÏòDNSÍ·²¿ĞÅÏ¢µÄÖ¸Õë [Ö¸Õë·µ»Ø]
+ */
+void parse_packet(
+    const char* packet,
+    int packet_len,
+    struct sockaddr_in* sock_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+)
+{
+    int QR;
+
+    ptr_packet_info->ip_addr = sock_addr->sin_addr.s_addr;
+    get_header_info(packet, ptr_packet_info, ptr_dns_header);
+
+    QR = (ptr_dns_header->flags & 0x8000) >> 15;
+    if (QR == 0) {
+        // query from DNS client
+        parse_query(packet, packet_len, sock_addr, ptr_packet_info, ptr_dns_header);
+    }
+    else {
+        // response from foreign DNS server
+        parse_response(packet, packet_len, sock_addr, ptr_packet_info, ptr_dns_header);
+    }
+
+}
 
 /**
- * @brief è½¬å‘DNSæŠ¥æ–‡
- * @param packet      æŒ‡å‘è¦å‘é€çš„æ•°æ®åŒ…çš„æŒ‡é’ˆ
- * @param send_len    è¦å‘é€çš„å­—èŠ‚æ•°
- * @param ptr_to_addr è¦å‘é€çš„ipåœ°å€
+ * @brief ×ª·¢DNS±¨ÎÄ
+ * @param packet      Ö¸ÏòÒª·¢ËÍµÄÊı¾İ°üµÄÖ¸Õë
+ * @param send_len    Òª·¢ËÍµÄ×Ö½ÚÊı
+ * @param ptr_to_addr Òª·¢ËÍµÄipµØÖ·
 */
-void relay_packet(const char* packet, int send_len, SOCKADDR_IN* ptr_to_addr)
+static inline void relay_packet(const char* packet, int send_len, SOCKADDR_IN* ptr_to_addr)
 {
     LPPER_HANDLE_DATA handle_info;
     LPPER_IO_DATA io_info;
     SOCKET temp_sock;
 
+    // ÏòÍâ²¿DNS·şÎñÆ÷·¢ËÍDNS²éÑ¯ÇëÇó
     if (ptr_to_addr == &_serv_addr) {
-
         temp_sock = socket(AF_INET, SOCK_DGRAM, 0);
         if (temp_sock == INVALID_SOCKET)
             log_error_message("relay_packet(): socket()");
-    
+
         if (connect(temp_sock, (SOCKADDR*)ptr_to_addr, sizeof(SOCKADDR)) == SOCKET_ERROR)
             log_error_message("relay_packet(): connect()");
 
         send(temp_sock, packet, send_len, 0);
-         
-        handle_info = (LPPER_HANDLE_DATA)malloc(sizeof(PER_HANDLE_DATA));
-        io_info = (LPPER_IO_DATA)malloc(sizeof(PER_IO_DATA));
 
-        // æ£€æŸ¥å†…å­˜åˆ†é…æƒ…å†µ
-        if (!handle_info || !io_info)
-            log_error_message("relay_packet(): malloc()");
-        else {
-            // æ¥å—DNSæŠ¥æ–‡
-            recv_packet((void*)handle_info, (void*)io_info, temp_sock);
-            closesocket(temp_sock);
-        }
+        handle_info = (LPPER_HANDLE_DATA)Malloc(sizeof(PER_HANDLE_DATA));
+        io_info = (LPPER_IO_DATA)Malloc(sizeof(PER_IO_DATA));
+
+        // ½ÓÊÜDNS±¨ÎÄ
+        recv_packet((void*)handle_info, (void*)io_info, temp_sock);
+        closesocket(temp_sock);
     }
-    else {
-        
-#ifdef _DEBUG
-        log_packet_raw(packet, send_len);
-#endif
-        WaitForSingleObject(get_relay_sock_mutex(), INFINITE);
+    else { // ½«Íâ²¿DNS·şÎñÆ÷µÄ»Ø¸´×ª·¢¸øÄÚ²¿µÄDNS¿Í»§¶Ë
         sendto(_relay_sock, packet, send_len, 0,
             (SOCKADDR*)ptr_to_addr, sizeof(SOCKADDR_IN));
-        ReleaseMutex(get_relay_sock_mutex());
     }
 }
 
+/**
+ * @brief ·ÖÎöÇëÇó±¨ÎÄ
+ * @param  packet            ½ÓÊÜµÄDNS±¨ÎÄ
+ * @param  packet_len        ½ÓÊÜµÄDNS±¨ÎÄ×Ö½ÚÊı
+ * @param  sock_addr         ±¨ÎÄ·¢ËÍ·½µÄĞÅÏ¢
+ * @param  ptr_packet_info   Ö¸Ïò±¨ÎÄĞÅÏ¢µÄÖ¸Õë    [Ö¸Õë·µ»Ø]
+ * @param  ptr_dns_header    Ö¸ÏòDNSÍ·²¿ĞÅÏ¢µÄÖ¸Õë
+ */
+static inline void parse_query(
+    const char* packet,
+    int packet_len,
+    struct sockaddr_in* sock_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+)
+{
+    char* packet_to_send;
+    unsigned rand_id;
+    unsigned short_max;
+    unsigned short* ptr_id;
+    IPListNode* ip_list = NULL;
 
+    parse_query_info(packet, ptr_packet_info->domain_name, &ptr_packet_info->type, &ptr_packet_info->class);
+    log_received_query_packet(packet, packet_len, sock_addr, ptr_packet_info, ptr_dns_header);
+
+    // ÔÚcacheÖĞËÑË÷, ¶Ô²»Á¼ÍøÕ¾½øĞĞÀ¹½Ø
+    cache_search(ptr_packet_info->domain_name, &ip_list);
+
+    
+    if (ip_list != NULL 
+        && ( ip_list->ip_addr == 0x0 // ²éÑ¯½á¹ûÎª²»Á¼ÍøÕ¾
+        ||   (ptr_packet_info->type == 0x01 && ptr_packet_info->class == 0x01) // ²éÑ¯IPv4
+            )
+        )
+    {
+        // Ö±½Ó¸ù¾İ cache ÖĞĞÅÏ¢Éú³ÉÏàÓ¦µÄÏìÓ¦·¢ËÍ¸øDNS¿Í»§¶Ë
+        int generate_size;
+        packet_to_send = (char*)Malloc(sizeof(char) * MAX_DNS_PKT_SIZE);
+
+        generate_packet(ptr_dns_header->id, ip_list, ptr_packet_info->domain_name,
+            packet_to_send, &generate_size);
+        sendto(_relay_sock, packet_to_send, generate_size, 0,
+            (struct sockaddr*)sock_addr, sizeof(struct sockaddr_in));
+        free(packet_to_send);
+        log_packet_sent(sock_addr, generate_size,
+            ptr_dns_header->id, ptr_dns_header->id);
+        return;
+    }
+
+    // cacheÖĞÃ»ÓĞÓòÃûĞÅÏ¢½øĞĞÖĞ¼Ì×ª·¢
+    short_max = 0xffff + 0x1;
+    if (id_search(ptr_dns_header->id, 0, 0, NULL) != ID_ALREADY_EXIST)
+    {
+        while (1) {
+            rand_id = rand() % short_max;
+            if (id_search(rand_id, 1, 0, NULL) != ID_ALREADY_EXIST)
+                break;
+        }
+
+        id_insert(MAKE_ID_PAIR(rand_id, ptr_dns_header->id), sock_addr);
+        packet_to_send = (char*)Malloc(sizeof(char) * packet_len);
+        ptr_id = (unsigned short*)packet_to_send;
+        memcpy(packet_to_send, packet, packet_len);
+        *ptr_id = htons(rand_id);
+        log_packet_sent(&_serv_addr, packet_len, ptr_dns_header->id, rand_id);
+        relay_packet(packet_to_send, packet_len, &_serv_addr);
+        free(packet_to_send);
+    }
+}
 
 /**
- * @brief åˆ†æå‘æ¥çš„DNSæŠ¥æ–‡, è·å–DNSæŠ¥æ–‡å¤´éƒ¨ä¿¡æ¯
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ [æŒ‡é’ˆè¿”å›]
+ * @brief ·ÖÎö»ØÓ¦±¨ÎÄ
+ * @param  packet            ½ÓÊÜµÄDNS±¨ÎÄ
+ * @param  packet_len        ½ÓÊÜµÄDNS±¨ÎÄ×Ö½ÚÊı
+ * @param  serv_addr         Íâ²¿DNS·şÎñÆ÷µÄÌ×½Ó×ÖµØÖ·
+ * @param  ptr_packet_info   Ö¸Ïò±¨ÎÄĞÅÏ¢µÄÖ¸Õë
+ * @param  ptr_dns_header    Ö¸ÏòDNSÍ·²¿ĞÅÏ¢µÄÖ¸Õë
  */
-static void get_header_info(
+static inline void parse_response(
+    const char* packet,
+    int packet_len,
+    struct sockaddr_in* serv_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+)
+{
+    char* packet_to_send;
+    unsigned short* ptr_id;
+    struct sockaddr_in client_addr;
+    int id;
+
+    id = id_search(ptr_dns_header->id, 1, 1, &client_addr);
+    if (id != ID_NOT_FOUND)
+    {
+        packet_to_send = (char*)Malloc(sizeof(char) * packet_len);
+        ptr_id = (unsigned short*)packet_to_send;
+        memcpy(packet_to_send, packet, packet_len);
+        *ptr_id = htons(id & 0xffff);
+
+        // ÏÂÃæµÄ relay_packet() Ö±½Ó·¢ËÍ packet_to_send µ½DNS¿Í»§¶Ë
+        relay_packet(packet_to_send, packet_len, &client_addr);
+        free(packet_to_send);
+
+        log_received_response_packet(packet, packet_len, &client_addr, serv_addr, ptr_dns_header, id);
+        parse_response_info(packet, packet_len);
+    }
+}
+
+/**
+* @brief Éú³ÉDNS±¨ÎÄ
+* @param id          ±¨ÎÄid
+* @param ip_list     ipÁ´±í
+* @param domain_name ²éÕÒµÄÓòÃû
+* @param packet      ±¨ÎÄ×Ö·û´® [Ö¸Õë·µ»Ø]
+* @param packet_size ±¨ÎÄµÄ³¤¶È [Ö¸Õë·µ»Ø]
+*/
+static inline void generate_packet(
+    unsigned short id,
+    IPListNode* ip_list,
+    const char* domain_name,
+    char* packet,
+    int* packet_size
+)
+{
+    unsigned short ans_cnt;
+    char* ptr = packet;
+    
+    get_ans_cnt(ip_list, &ans_cnt);
+
+    generate_dns_header(&ptr, id, ans_cnt);
+
+    generate_question_section(&ptr, domain_name);
+
+    generate_answer_section(&ptr, ip_list, ans_cnt);
+
+    *packet_size = (int)(ptr - packet);
+}
+
+/**
+* @brief Ò»¸öÓòÃû¿ÉÄÜ¶ÔÓ¦¶à¸öIP£¬º¯Êı·µ»ØÓòÃû¶ÔÓ¦µÄIPÊıÄ¿
+* @param ip_list      IPÁ´±í
+* @param ptr_ans_cnt  answerµÄÊıÁ¿£¬¼´ÓĞĞ§µÄIPµÄÊıÄ¿ [Ö¸Õë·µ»Ø]
+*/
+static inline void get_ans_cnt(IPListNode* ip_list, unsigned short* ptr_ans_cnt)
+{
+    IPListNode* pnode = ip_list;
+    *ptr_ans_cnt = 0;
+
+    if (pnode->ip_addr != 0x0)
+    {
+        while (pnode != NULL) {
+            (*ptr_ans_cnt)++;
+            pnode = pnode->next;
+        }
+    }
+}
+
+/**
+* @brief Éú³ÉDNS±¨Í·
+* @param dptr     Ö¸Ïò±¨ÎÄµÄ¶ş¼¶Ö¸Õë
+* @param id       ÊÂÎñID
+* @param ans_cnt  answer_count
+*/
+static inline void generate_dns_header(char** dptr, unsigned short id, unsigned short ans_cnt)
+{
+    // id
+    *(unsigned short*)(*dptr) = htons(id);    *dptr += 2;
+
+    // flags
+    if (!ans_cnt)
+        *(unsigned short*)(*dptr) = htons(0x8183); // No such name.
+    else
+        *(unsigned short*)(*dptr) = htons(0x8180);
+    *dptr += 2;
+
+    // question_count
+    *(unsigned short*)(*dptr) = htons(0x1);    *dptr += 2;
+
+    // answer_count
+    *(unsigned short*)(*dptr) = htons(ans_cnt);    *dptr += 2;
+
+    // authority count
+    *(unsigned short*)(*dptr) = htons(0x0);    *dptr += 2;
+    // additional count
+    *(unsigned short*)(*dptr) = htons(0x0);    *dptr += 2;
+}
+
+/**
+* @brief Éú³ÉDNS±¨ÎÄµÄquestion²¿·Ö
+* @param dptr     Ö¸Ïò±¨ÎÄµÄ¶ş¼¶Ö¸Õë
+* @domain_name    ÓòÃû
+*/
+static inline void generate_question_section(char **dptr, const char* domain_name)
+{
+    char* str;
+    char temp_name[MAX_DOMAIN_SIZE];
+    strcpy(temp_name, domain_name);
+
+    // domain name
+    str = strtok(temp_name, ".");
+    while (str) {
+        unsigned char str_len = strlen(str) & 0xff;
+        *(unsigned char*)(*dptr)++ = str_len;
+
+        strcpy(*dptr, str);       *dptr += str_len;
+
+        str = strtok(NULL, ".");
+    }
+    *(unsigned char*)(*dptr)++ = 0x00;
+
+    // type
+    *(unsigned short*)(*dptr) = htons(0x1);     *dptr += 2;
+    // class
+    *(unsigned short*)(*dptr) = htons(0x1);     *dptr += 2;
+}
+
+/**
+* @brief Éú³ÉDNS±¨ÎÄµÄanswer²¿·Ö
+* @param dptr         Ö¸Ïò±¨ÎÄµÄ¶ş¼¶Ö¸Õë
+* @param ip_list      IPÁ´±í
+* @param ans_cnt      ÓĞĞ§IPÊıÄ¿
+*/
+static inline void generate_answer_section(char **dptr, IPListNode* ip_list, unsigned short ans_cnt)
+{
+    int i;
+    IPListNode* pnode = ip_list;
+    for (i = 0; i < ans_cnt; i++) {
+        // name : Ê¹ÓÃCompression Label
+        *(unsigned short*)(*dptr) = htons(0xc00c);  *dptr += 2;
+        // type : A = 1
+        *(unsigned short*)(*dptr) = htons(0x1);     *dptr += 2;
+        // class: IN = 1
+        *(unsigned short*)(*dptr) = htons(0x1);     *dptr += 2;
+        // time to live (4 octets): Éú´æÆÚµÄÃëÊı, ÕâÀïÉèÖÃ³É 192 Ãë
+        *(unsigned int*)(*dptr) = htons(0xc0);      *dptr += 4;
+        // data length (2 octets): 4 Îª IPv4, 16 Îª IPv6
+        *(unsigned short*)(*dptr) = htons(0x4);     *dptr += 2;
+        // IPv4 Address
+        *(unsigned int*)(*dptr) = pnode->ip_addr;  *dptr += 4; // ? htons
+        pnode = pnode->next;
+    }
+}
+
+/**
+ * @brief ÓÉDNS±¨ÎÄ»ñµÃÒª²éÕÒµÄÓòÃûĞÅÏ¢
+ * @param packet       DNS±¨ÎÄ
+ * @param domain_name  ÓòÃûĞÅÏ¢             [Ö¸Õë·µ»Ø]
+ * @param type         type of the query    [Ö¸Õë·µ»Ø]
+ * @param class        class of the query   [Ö¸Õë·µ»Ø]
+*/
+static inline void parse_query_info(const char* packet, char* domain_name, unsigned short* type, unsigned short* class)
+{
+    const char* ptr = packet + sizeof(DNS_HEADER);
+
+    get_query_name((char **) & ptr, domain_name);
+    get_query_type(ptr, type, class);
+}
+
+/**
+* @brief ÓÉDNS±¨ÎÄ»ñµÃÒª²éÕÒµÄĞÅÏ¢
+* @param dptr        Ö¸Ïò packet µÄ¶şÖØÖ¸Õë
+* @param domain_name ÓòÃû                 [Ö¸Õë·µ»Ø]
+*/
+static inline void get_query_name(char** dptr, char* domain_name)
+{
+    // Question(Query) Section Format :
+    // |-----------------------|
+    // | Query Name (variable) | <==
+    // |-----------------------|
+    // | Query Type (16 bits)  | 
+    // |-----------------------|
+    // | Query Class (16 bits) |
+    // |-----------------------|
+
+    int i;
+    int cursor;
+    int size;
+    cursor = 0;
+    size = *((*dptr)++);
+    while (size != 0) {
+        for (i = 0; i < size; i++)
+            domain_name[cursor++] = *((*dptr)++);
+        domain_name[cursor++] = '.';
+        size = *((*dptr)++);
+    }
+    domain_name[cursor - 1] = '\0';
+}
+
+/**
+* @brief ÓÉDNS±¨ÎÄ»ñµÃÒª²éÕÒµÄÀàĞÍ
+* @param ptr          Ö¸ÏòDNSÇëÇó±¨ÎÄµÄqtype, qclassµÄÖ¸Õë
+* @param type         type of the query   [Ö¸Õë·µ»Ø]
+* @param class        class of the query  [Ö¸Õë·µ»Ø]
+*/
+static inline void get_query_type(const char* ptr, unsigned short* type, unsigned short* class)
+{
+    // Question(Query) Section Format :
+    // |-----------------------|
+    // | Query Name (variable) |
+    // |-----------------------|
+    // | Query Type (16 bits)  | <==
+    // |-----------------------|
+    // | Query Class (16 bits) | <==
+    // |-----------------------|
+
+    *type = ntohs(*(unsigned short*)ptr);
+    ptr += sizeof(unsigned short);
+    *class = ntohs(*(unsigned short*)ptr);
+    ptr += sizeof(unsigned short);
+}
+
+/** 
+* @brief ½âÎöDNSÏìÓ¦±¨ÎÄÖĞµÄĞÅÏ¢
+* @param packet       DNS±¨ÎÄ
+* @param packet_len   DNS±¨ÎÄ³¤¶È
+*/
+static inline void parse_response_info(const char* packet, int packet_len)
+{
+    const char* ptr = packet;
+    char* name = (char*)Malloc(sizeof(char) * MAX_DOMAIN_SIZE);
+    // DNS Fixed Header : 12 bytes
+    ptr += 12;
+
+    // Question(Query) Section Format
+    get_query_name((char**)&ptr, name);
+    ptr += sizeof(unsigned short) * 2;
+
+    // Answer Section Format :
+    get_ip_in_answer(ptr, packet_len - (int)(ptr - packet), name);
+    free(name);
+}
+
+/**
+* @brief ´Óanswer sectionÖĞ»ñÈ¡IPĞÅÏ¢, ²¢ÇÒ²åÈëµ½CacheÖĞ
+*/
+static inline void get_ip_in_answer(const char* ptr, int remain_len, const char* domain_name)
+{
+    // Answer Section Format :
+    // |-----------------------|
+    // |    Name (variable)    |
+    // |-----------------------|
+    // |    Type (16 bits)     |
+    // |-----------------------|
+    // |    Class (16 bits)    |
+    // |-----------------------|
+    // |         TTL           |
+    // |      (32 bits)        |
+    // |-----------------------|
+    // |    RDLENGTH (16 bits) |
+    // |-----------------------|
+    // |    RDATA (variable)   |
+    // |-----------------------|
+    unsigned short type;
+    unsigned short class;
+    unsigned short rd_len;
+    uint32_t ip_addr;
+    int i = 0;
+
+    while (i < remain_len) {
+        // Name field
+        if ((ptr[i] & 0xc0) == 0xc0) { // compression label
+            i += 2;
+        }
+        else { // data label
+            while (ptr[i] != 0) i++;
+            i++;
+        }
+
+        // type & class
+        type = ntohs(*((unsigned short*)(&ptr[i])));
+        class = ntohs(*((unsigned short*)(&ptr[i + 2])));
+        i += 4;
+
+        // ttl not used
+        i += 4;
+
+        // rd_len
+        rd_len = ntohs(*((unsigned short*)(&ptr[i])));
+        i += 2;
+
+        // rdata
+        if (type == 0x0001 && class == 0x0001) {
+            // rdata ÎªIPv4µØÖ·
+            ip_addr = *((uint32_t*)(&ptr[i]));
+            cache_insert(domain_name, ip_addr);
+        }
+        i += rd_len;
+    }
+    
+}
+
+/**
+ * @brief ·ÖÎö·¢À´µÄDNS±¨ÎÄ, »ñÈ¡DNS±¨ÎÄÍ·²¿ĞÅÏ¢
+ * @param  packet            ½ÓÊÜµÄDNS±¨ÎÄ
+ * @param  packet_len        ½ÓÊÜµÄDNS±¨ÎÄ×Ö½ÚÊı
+ * @param  ptr_packet_info   Ö¸Ïò±¨ÎÄĞÅÏ¢µÄÖ¸Õë    [Ö¸Õë·µ»Ø]
+ * @param  ptr_dns_header    Ö¸ÏòDNSÍ·²¿ĞÅÏ¢µÄÖ¸Õë [Ö¸Õë·µ»Ø]
+ */
+static inline void get_header_info(
     const char* packet,
     PACKET_INFO* ptr_packet_info,
     DNS_HEADER* ptr_dns_header
 )
 {
-    const unsigned short* cursor = packet;
+    const unsigned short* cursor = (const unsigned short*)packet;
 
     // Transaction ID: 2 octets
-    ptr_packet_info->id = ntohs(*cursor);
     ptr_dns_header->id = ntohs(*cursor);
     cursor++;
 
@@ -212,296 +641,4 @@ static void get_header_info(
     // Additional Infomation Count
     ptr_dns_header->additional_count = ntohs(*cursor);
     cursor++;
-
 }
-
-
-
-/**
- * @brief åˆ†æå‘æ¥çš„DNSæŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  sock_addr         æŠ¥æ–‡å‘é€æ–¹çš„ä¿¡æ¯
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ [æŒ‡é’ˆè¿”å›]
- */
-void parse_packet(
-    const char* packet,
-    int packet_len,
-    struct sockaddr_in* sock_addr,
-    PACKET_INFO* ptr_packet_info,
-    DNS_HEADER* ptr_dns_header
-)
-{
-    int QR;
-
-    ptr_packet_info->ip_addr = sock_addr->sin_addr.s_addr;
-    get_header_info(packet, ptr_packet_info, ptr_dns_header);
-
-    QR = (ptr_dns_header->flags & 0x8000) >> 15;
-    if (QR == 0) {
-        // query from DNS client
-        parse_query(packet, packet_len, sock_addr, ptr_packet_info, ptr_dns_header);
-    }
-    else {
-        // response from foreign DNS server
-        parse_response(packet, packet_len, ptr_packet_info, ptr_dns_header);
-    }
-
-}
-
-
-/// @brief ç”ŸæˆDNSæŠ¥æ–‡
-/// @param packet æŠ¥æ–‡å­—ç¬¦ä¸²
-/// @param id     æŠ¥æ–‡id
-/// @param packet_size æŠ¥æ–‡çš„é•¿åº¦
-/// @param domain_name æŸ¥æ‰¾çš„åŸŸå
-/// @param ip_list ipé“¾è¡¨
-static void generate_packet(
-    char* packet,
-    unsigned short id,
-    int* packet_size,
-    const char* domain_name,
-    IPListNode* ip_list
-)
-{
-    char *ptr;
-    char *str;
-    char temp_name[MAX_DOMAIN_SIZE];
-    BOOL invalid = TRUE;
-
-    if (ip_list->ip_addr == 0x0)
-        invalid = TRUE;
-    ptr = packet;
-    strcpy(temp_name, domain_name);
-
-    // id
-    *(unsigned short*)ptr = htons(id);      ptr += 2;
-
-    // flags
-    if (invalid)
-        *(unsigned short*)ptr = htons(0x8182);
-    else
-        *(unsigned short*)ptr = htons(0x8180);
-    ptr += 2;
-
-    // question_count
-    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
-
-    // answer_count
-    if (invalid)
-        *(unsigned short*)ptr = htons(0x0);
-    else
-        *(unsigned short*)ptr = htons(0x1);
-    ptr += 2;
-
-    // authority count
-    *(unsigned short*)ptr = htons(0x0);     ptr += 2;
-    
-    // additional count
-    *(unsigned short*)ptr = htons(0x0);     ptr += 2;
-    
-    // question section
-    // domain name
-    str = strtok(temp_name, ".");
-    while (str) {
-        unsigned char str_len = strlen(str) & 0xff;
-        *(unsigned char*)ptr++ = str_len;
-
-        strcpy(ptr, str);       ptr += str_len;
-
-        str = strtok(NULL, ".");
-    }
-    *(unsigned char*)ptr++ = 0x00;
-
-    // type
-    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
-    // class
-    *(unsigned short*)ptr = htons(0x1);     ptr += 2;
-
-    if (!invalid) {
-        // answer section
-        // name, ä½¿ç”¨åç§»æŒ‡é’ˆ(è§RFC1035: 4.1.4 message compression)
-        *(unsigned short*)ptr = htons(0xc00c);  ptr += 2;
-        // type, A = 1
-        *(unsigned short*)ptr = htons(0x1);     ptr += 2;
-        // class, IN = 1
-        *(unsigned short*)ptr = htons(0x1);     ptr += 2;
-        // time to live, 4 octets, è¡¨ç¤ºç§’æ•°, è¿™é‡Œè®¾ç½®æˆ 192 ç§’
-        *(unsigned int*)ptr = htons(0xc0);      ptr += 4;
-        // data length,  2 octets, 4 ä¸º IPv4, 16 ä¸º IPv6
-        *(unsigned short*)ptr = htons(0x4);     ptr += 2;
-        // A Address
-        *(unsigned int*)ptr = htons(ip_list->ip_addr);  ptr += 4;
-    }
-
-    *packet_size = (int)(ptr - packet);
-}
-
-
-
-/**
- * @brief åˆ†æè¯·æ±‚æŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  sock_addr         æŠ¥æ–‡å‘é€æ–¹çš„ä¿¡æ¯
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ 
- */
-void parse_query(
-    const char* packet,
-    int packet_len,
-    struct sockaddr_in* sock_addr,
-    PACKET_INFO* ptr_packet_info,
-    DNS_HEADER* ptr_dns_header
-)
-{
-    char *packet_to_send;
-    unsigned rand_id;
-    unsigned short_max;
-    unsigned short type;
-    unsigned short class;
-    unsigned short *ptr_id;
-    IPListNode* ip_list = NULL;
-
-    get_query_info(packet, ptr_packet_info->domain_name, &type, &class);
-
-    // åœ¨cacheä¸­æœç´¢, å¯¹ä¸è‰¯ç½‘ç«™è¿›è¡Œæ‹¦æˆª
-    cache_search(ptr_packet_info->domain_name, &ip_list);
-    
-    if (ip_list != NULL) {
-        // ç›´æ¥åœ¨ cache ä¸­è·å– ip åœ°å€å‘é€ç»™å®¢æˆ·ç«¯
-        int generate_size;
-        packet_to_send = (char *)malloc(sizeof(char) * packet_len);
-        if (packet_to_send == NULL)
-            log_error_message("parse_query(): malloc()");
-        else {
-            generate_packet(packet_to_send, ptr_dns_header->id, &generate_size, ptr_packet_info->domain_name, ip_list);
-            sendto(_relay_sock, packet_to_send, generate_size, 0,
-                (struct sockaddr*)sock_addr, sizeof(struct sockaddr_in));
-        }
-        return;
-    }
-
-    short_max = 0xffff + 0x1;
-    if (id_search(ptr_dns_header->id, 0, 0, NULL) != ID_ALREADY_EXIST)
-    {
-        while (1) {
-            srand(time(NULL));      // çº¿ç¨‹å®‰å…¨ ?
-            rand_id = rand() % short_max;
-            if (id_search(rand_id, 1, 0, NULL) != ID_ALREADY_EXIST)
-                break;
-        }
-
-        id_insert(MAKE_ID_PAIR(rand_id, ptr_dns_header->id), sock_addr);
-        packet_to_send = (char *)malloc(sizeof(char) * packet_len);
-        if (packet_to_send == NULL)
-            log_error_message("parse_query(): malloc()");
-        else {
-            ptr_id = packet_to_send;
-            memcpy(packet_to_send, packet, packet_len);
-            *ptr_id = htons(rand_id);
-            relay_packet(packet_to_send, packet_len, &_serv_addr);
-            free(packet_to_send);
-        }
-    }
-}
-
-
-
-/**
- * @brief åˆ†æå›åº”æŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ 
- */
-void parse_response(
-    const char* packet,
-    int packet_len,
-    PACKET_INFO* ptr_packet_info,
-    DNS_HEADER* ptr_dns_header
-)
-{
-    char *packet_to_send;
-    unsigned short *ptr_id;
-    struct sockaddr_in client_addr;
-    int id;
-
-    id = id_search(ptr_dns_header->id, 1, 1, &client_addr);
-    if (id != ID_NOT_FOUND)
-    {
-        packet_to_send = (char *)malloc(sizeof(char) * packet_len);
-        if (packet_to_send == NULL)
-            log_error_message("parse_response(): malloc()");
-        else {
-            ptr_id = packet_to_send;
-            memcpy(packet_to_send, packet, packet_len);
-            *ptr_id = htons(id & 0xffff);
-            relay_packet(packet_to_send, packet_len, &client_addr);
-            free(packet_to_send);
-        }
-    }
-}
-
-
-
-/**
- * @brief ç”±DNSæŠ¥æ–‡è·å¾—è¦æŸ¥æ‰¾çš„åŸŸåä¿¡æ¯
- * @param packet       DNSæŠ¥æ–‡
- * @param domain_name  åŸŸåä¿¡æ¯
- * @param type         type of the query
- * @param class        class of the query
-*/
-static void get_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class)
-{
-    int i;
-    int cursor;
-    int size;
-
-    cursor = 0;
-    packet += sizeof(DNS_HEADER);
-    size = *packet++;
-    while (size != 0) {
-        for (i = 0; i < size; i++)
-            domain_name[cursor++] = *packet++;
-        domain_name[cursor++] = '.';
-        size = *packet++;
-    }
-    domain_name[cursor - 1] = '\0';
-
-    get_query_type(packet, type, class);
-}
-
-
-
-
-
-/**
-* @brief ç”±DNSæŠ¥æ–‡è·å¾—è¦æŸ¥æ‰¾çš„ç±»å‹
-* @param ptr          æŒ‡å‘DNSè¯·æ±‚æŠ¥æ–‡çš„qtype, qclassçš„æŒ‡é’ˆ
-* @param type         type of the query
-* @param class        class of the query
-*/
-static void get_query_type(const char * ptr, unsigned short* type, unsigned short* class)
-{
-    *type = ntohs(*(unsigned short*)ptr);
-    ptr += sizeof(unsigned short);
-    *class = ntohs(*(unsigned short*)ptr);
-    ptr += sizeof(unsigned short);
-}
-
-
-
-
-
-#ifdef _DEBUG
-/**
- * @brief echo æµ‹è¯•
-*/
-void send_packet_test(const char* buf, int send_len, SOCKADDR_IN* ptr_to_addr)
-{
-    sendto(_relay_sock, buf, send_len, 0,
-        (SOCKADDR *)ptr_to_addr, sizeof(SOCKADDR_IN));
-}
-#endif

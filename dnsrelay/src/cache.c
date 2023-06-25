@@ -1,15 +1,19 @@
+/**
+* ÊµÏÖcache
+*/
+
 #include "cache.h"
 #include "log.h"
 #include "thread.h"
-#include <string.h>
-#include <stdbool.h>
+#include "common.h"
+
 
 #ifdef _DEBUG
 #include <assert.h>
 #endif
 
 
-/// @brief å­—å…¸æ ‘èŠ‚ç‚¹
+/// @brief ×ÖµäÊ÷½Úµã
 typedef struct _TrieNode
 {
 	IPListNode* ip_list;
@@ -24,30 +28,25 @@ typedef struct _Trie
 
 
 static Trie _ip_trie;
+static char _idx_table[256] = {0};
+
+static inline bool validate_domain_name(const char* domain_name);
+static inline void idx_table_init();
+static inline int get_idx(char chr);
+static inline TrieNode* get_trie_node();
+static inline bool no_children(PtrTrieNode pnode);
+static inline void list_append(IPListNode** plist, uint32_t val);
+static inline void list_free(IPListNode** plist);
+static inline void insert(PtrTrieNode root, const char* key, uint32_t val, int len);
+static inline PtrTrieNode search(TrieNode* root, const char* key, int len);
+static inline PtrTrieNode delete(PtrTrieNode root, const char* key, int len);
+static inline void cache_remove(const char* domain_name);
+static inline void ttl_remove(PtrTrieNode root, IPListNode** ip_list_ptr, const char* domain_name);
 
 
-static void* Malloc(unsigned long long size);
-
-static TrieNode* getTrieNode();
-
-static bool noChildren(PtrTrieNode pnode);
-
-static void list_append(IPListNode** plist, UINT32 val);
-
-static void list_free(IPListNode** plist);
-
-static void insert(PtrTrieNode root, const char* key, UINT32 val, int len);
-
-static PtrTrieNode search(PtrTrieNode root, const char* key, int len);
-
-static PtrTrieNode delete(PtrTrieNode root, const char* key, int len);
-
-static void cache_remove(const char* domain_name);
-
-static void ttl_remove(PtrTrieNode root, IPListNode** ip_list_ptr, const char* domain_name);
 
 /**
- * @brief åˆ›å»ºå­—å…¸æ ‘
+ * @brief ´´½¨×ÖµäÊ÷
 */
 void cache_init()
 {
@@ -62,33 +61,139 @@ void cache_init()
 
     for (i = 0; i < ALPHABET_SIZE; i++)
         root->children[i] = NULL;
+
+    idx_table_init();
 }
 
 
-
-
-
 /**
- * @brief æ’å…¥ä¸€ä¸ªèŠ‚ç‚¹
- * @param domain_name åŸŸå			  [key]
- * @param ip_addr	  ipåœ°å€çš„æ•°å€¼å½¢å¼ [value]
+ * @brief ²åÈëÒ»¸ö½Úµã
+ * @param domain_name ÓòÃû			  [key]
+ * @param ip_addr	  ipµØÖ·µÄÊıÖµĞÎÊ½ [value]
 */
-void cache_insert(const char* domain_name, UINT32 ip_addr)
+void cache_insert(const char* domain_name, uint32_t ip_addr)
 {
+    if (validate_domain_name(domain_name)) {
+        WaitForSingleObject(get_cache_mutex(), INFINITE);
+        PtrTrieNode root = _ip_trie.root;
+        insert(root, domain_name, ip_addr, 0);
+        ReleaseMutex(get_cache_mutex());
+    }
+}
+
+
+/**
+ * @brief ²éÕÒÒ»¸öÒ¶×Ó½Úµã
+ * @param domain_name ÓòÃû  [key]
+ * @param addr_list   ·µ»Ø°üº¬IPĞÅÏ¢µÄÁ´±í
+*/
+void cache_search(const char* domain_name, IPListNode** addr_list)
+{
+    if (validate_domain_name(domain_name)) {
+        WaitForSingleObject(get_cache_mutex(), INFINITE);
+
+        TrieNode* pnode = search(_ip_trie.root, domain_name, 0);
+
+        if (pnode == NULL)
+            *addr_list = NULL;
+        else {
+            ttl_remove(pnode, &pnode->ip_list, domain_name);
+            *addr_list = pnode->ip_list;
+//#ifdef _DEBUG
+//            assert(pnode->ip_list != NULL);
+//#endif
+        }
+        ReleaseMutex(get_cache_mutex());
+    }
+}
+
+
+/**
+ * @brief  ·µ»Ø»º´æËùÕ¼µÄÄÚ´æ´óĞ¡
+ * @return »º´æËùÕ¼µÄÄÚ´æ´óĞ¡   
+*/
+int cache_memory_size() {
     WaitForSingleObject(get_cache_mutex(), INFINITE);
-    PtrTrieNode root = _ip_trie.root;
-    insert(root, domain_name, ip_addr, 0);
+    int ret;
+    ret = _ip_trie.size * sizeof(TrieNode);
     ReleaseMutex(get_cache_mutex());
+    return ret;
 }
 
 /**
- * @brief æ’å…¥ä¸€ä¸ªèŠ‚ç‚¹, è¾…åŠ©å‡½æ•°
- * @param root ä¸€ä¸ªæŒ‡å‘å­æ ‘çš„æ ¹èŠ‚ç‚¹çš„æŒ‡é’ˆ
- * @param key  å¯¹åº”çš„é”®
- * @param val  å¯¹åº”çš„å€¼
- * @param len  é€’å½’æ·±åº¦, åˆ°æ ‘çš„æ ¹çš„è·¯å¾„é•¿
+* ! ±È½ÏÉÙ¼ûµÄÓòÃû²»´æÈëCache
+* @brief ÅĞ¶ÏÓòÃûÊÇ·ñ°üº¬ÌØÊâ×Ö·û, ÆäÖĞÓ¢ÎÄ×ÖÄ¸¡¢°¢À­²®Êı×ÖÒÔ¼°'.'¡¢'-'¡¢ '_'ÒÔÍâµÄ×Ö·ûÒ»ÂÉÊÓÎª·Ç·¨×Ö·û
+* @param domain_name ÓòÃû
+* @return ºÏ·¨·µ»Øtrue, ·ñÔò·µ»Øfalse
 */
-static void insert(PtrTrieNode root, const char* key, UINT32 val, int len)
+static inline bool validate_domain_name(const char* domain_name)
+{
+    char chr;
+    const char* ptr = domain_name;
+    bool flag = true;
+
+    while (*ptr != 0) {
+        chr = *ptr++;
+        if (is_digit(chr) || is_letter(chr) ||
+            chr == '.' || chr == '-' || chr == '_')
+            continue;
+
+        // ·Ç·¨×Ö·û³öÏÖ
+        flag = false;
+        break;
+    }
+    return flag;
+}
+
+
+/**
+* @brief ³õÊ¼»¯idx_table
+*/
+static inline void idx_table_init()
+{
+    for (unsigned i = 0; i < 256; i++) {
+        if (i >= (unsigned char)'a' && i <= (unsigned char)'z') {
+            _idx_table[i] = 0 + i - (unsigned char)'a';
+        }
+        else if (i >= (unsigned char)'A' && i <= (unsigned char)'Z') {
+            _idx_table[i] = 26 + i - (unsigned char)'A';
+        }
+        else if (i >= (unsigned char)'0' && i <= (unsigned char)'9') {
+            _idx_table[i] = 52 + i - (unsigned char)'0';
+        }
+        else if (i == (unsigned char)'.') {
+            _idx_table[i] = 62;
+        }
+        else if (i == (unsigned char)'-') {
+            _idx_table[i] = 63;
+        }
+        else if (i == (unsigned char)'_') {
+            _idx_table[i] = 64;
+        }
+        else {
+            _idx_table[i] = 65;
+        }
+    }
+}
+
+/**
+* @brief  ¸ù¾İ×Ö·ûchr´Ó_idx_tableÖĞ»ñÈ¡Ë÷Òı
+* @param  chr ascii×Ö·û
+* @return chrÔÚ_idx_tableÖĞ¶ÔÓ¦µÄË÷Òı
+*/
+static inline int get_idx(char chr)
+{
+    return _idx_table[(unsigned char)chr];
+}
+
+/**
+ * @brief ²åÈëÒ»¸ö½Úµã, ¸¨Öúº¯Êı
+ * @param root Ò»¸öÖ¸Ïò×ÓÊ÷µÄ¸ù½ÚµãµÄÖ¸Õë
+ * @param key  ¶ÔÓ¦µÄ¼ü
+ * @param val  ¶ÔÓ¦µÄÖµ
+ * @param len  µİ¹éÉî¶È, µ½Ê÷µÄ¸ùµÄÂ·¾¶³¤
+*/
+static inline void insert(PtrTrieNode root, const char* key, uint32_t val, int len)
 {
     char c;
     int index;
@@ -99,21 +204,17 @@ static void insert(PtrTrieNode root, const char* key, UINT32 val, int len)
     }
 
     c = key[len];
-    index = GET_INDEX(c);
+    index = get_idx(c);
 
     if (!root->children[index])
-        root->children[index] = getTrieNode();
+        root->children[index] = get_trie_node();
 
     insert(root->children[index], key, val, len + 1);
 }
 
-
-
-
-
-/// @brief   åˆ›å»ºä¸€ä¸ªåˆå§‹åŒ–äº†çš„TrieNode
-/// @return  ä¸€ä¸ªåˆå§‹åŒ–äº†çš„TrieNode
-static TrieNode* getTrieNode()
+/// @brief   ´´½¨Ò»¸ö³õÊ¼»¯ÁËµÄTrieNode
+/// @return  Ò»¸ö³õÊ¼»¯ÁËµÄTrieNode
+static inline TrieNode* get_trie_node()
 {
     TrieNode* p = (TrieNode*)Malloc(sizeof(TrieNode));
     p->ip_list = NULL;
@@ -125,24 +226,22 @@ static TrieNode* getTrieNode()
     return p;
 }
 
-
-
-
-
-/// @brief åœ¨é“¾è¡¨å°¾éƒ¨æ·»åŠ ä¸€é¡¹, æ£€æŸ¥æ˜¯å¦é‡å¤
-/// @param plist ä¸€ä¸ªæŒ‡å‘listå¤´ç»“ç‚¹çš„æŒ‡é’ˆ
-/// @param val   æ·»åŠ çš„å€¼(ip_addr)
-static void list_append(IPListNode** plist, UINT32 val)
+/**
+* @brief ÔÚÁ´±íÎ²²¿Ìí¼ÓÒ»Ïî, ¼ì²éÊÇ·ñÖØ¸´
+* @param plist Ò»¸öÖ¸ÏòlistÍ·½áµãµÄÖ¸Õë
+* @param val   Ìí¼ÓµÄÖµ(ip_addr)
+*/
+static inline void list_append(IPListNode** plist, uint32_t val)
 {
     bool repeat;
-    IPListNode* curr, *prev;
+    IPListNode* curr, * prev;
 
     if (*plist == NULL) {
-        *plist = (IPListNode*) Malloc(sizeof(IPListNode));
+        *plist = (IPListNode*)Malloc(sizeof(IPListNode));
         (*plist)->ip_addr = val;
         (*plist)->next = NULL;
         (*plist)->start_time = time(NULL);
-        (*plist)->time_to_live = 2 * SEC_PER_DAY;
+        (*plist)->time_to_live = (val == 0x0)? INFINITE_TTL: TTL;
         _ip_trie.size++;
     }
     else {
@@ -163,50 +262,23 @@ static void list_append(IPListNode** plist, UINT32 val)
             curr->ip_addr = val;
             curr->next = NULL;
             curr->start_time = time(NULL);
-            curr->time_to_live = 2 * SEC_PER_DAY;
+            curr->time_to_live = (val == 0x0) ? INFINITE_TTL : TTL;
             prev->next = curr;
         }
     }
 }
 
-
-
-
-
-/**
- * @brief æŸ¥æ‰¾ä¸€ä¸ªå¶å­èŠ‚ç‚¹
- * @param domain_name åŸŸå  [key]
- * @param addr_list   è¿”å›åŒ…å«IPä¿¡æ¯çš„é“¾è¡¨
-*/
-void cache_search(const char* domain_name, IPListNode** addr_list)
-{
-    WaitForSingleObject(get_cache_mutex(), INFINITE);
-    TrieNode* pnode = search(_ip_trie.root, domain_name, 0);
-
-    if (pnode == NULL)
-        *addr_list = NULL;
-    else {
-        ttl_remove(pnode, &pnode->ip_list, domain_name);
-        *addr_list = pnode->ip_list;
-#ifdef _DEBUG
-        assert(pnode->ip_list != NULL);
-#endif
-    }
-    ReleaseMutex(get_cache_mutex());
-}
-
-
 #define GET_DIFFTIME(x) (difftime(time(NULL), (x)))
 
 /**
- * @brief æ ¹æ®ttlè¿›è¡Œåˆ é™¤, åœ¨æœç´¢æ—¶æ£€æŸ¥æ˜¯å¦è¦åˆ é™¤
- * @param root         ä¸€ä¸ªæŒ‡å‘TrieNodeçš„æŒ‡é’ˆ
- * @param ip_list_ptr  ä¸€ä¸ªæŒ‡å‘é“¾è¡¨çš„äºŒçº§æŒ‡é’ˆ
- * @param domain_name  åŸŸå
+ * @brief ¸ù¾İttl½øĞĞÉ¾³ı, ÔÚËÑË÷Ê±¼ì²éÊÇ·ñÒªÉ¾³ı
+ * @param root         Ò»¸öÖ¸ÏòTrieNodeµÄÖ¸Õë
+ * @param ip_list_ptr  Ò»¸öÖ¸ÏòÁ´±íµÄ¶ş¼¶Ö¸Õë
+ * @param domain_name  ÓòÃû
 */
-static void ttl_remove(PtrTrieNode root, IPListNode** ip_list_ptr, const char* domain_name)
+static inline void ttl_remove(PtrTrieNode root, IPListNode** ip_list_ptr, const char* domain_name)
 {
-    IPListNode* curr, *prev, *dummy;
+    IPListNode* curr, * prev, * dummy;
     dummy = (IPListNode*)Malloc(sizeof(IPListNode));
     dummy->next = *ip_list_ptr;
 
@@ -227,16 +299,14 @@ static void ttl_remove(PtrTrieNode root, IPListNode** ip_list_ptr, const char* d
     free(dummy);
 }
 
-
-
 /**
- * @brief æœç´¢, è¾…åŠ©å‡½æ•°
- * @param root å­æ ‘çš„æ ¹èŠ‚ç‚¹
- * @param key  æŸ¥æ‰¾çš„é”®
- * @param len  é€’å½’çš„æ·±åº¦
- * @return NULL å¦‚æœæ²¡æ‰¾åˆ°; æŒ‡å‘é”®å¯¹åº”çš„TrieNode, å¦‚æœæ‰¾åˆ°
+ * @brief ËÑË÷, ¸¨Öúº¯Êı
+ * @param root ×ÓÊ÷µÄ¸ù½Úµã
+ * @param key  ²éÕÒµÄ¼ü
+ * @param len  µİ¹éµÄÉî¶È
+ * @return NULL Èç¹ûÃ»ÕÒµ½; Ö¸Ïò¼ü¶ÔÓ¦µÄTrieNode, Èç¹ûÕÒµ½
 */
-static PtrTrieNode search(TrieNode* root, const char*key, int len)
+static inline PtrTrieNode search(TrieNode* root, const char* key, int len)
 {
     char c;
     int index;
@@ -244,40 +314,33 @@ static PtrTrieNode search(TrieNode* root, const char*key, int len)
     if (len == strlen(key)) return root;
 
     c = key[len];
-    index = GET_INDEX(c);
+    index = get_idx(c);
     return search(root->children[index], key, len + 1);
 }
 
-
-
-
 /**
- * ! ä¸æä¾›å¤–éƒ¨æ¥å£
- * @brief åˆ é™¤ä¸€ä¸ªèŠ‚ç‚¹
- * @param domain_name è¦åˆ é™¤çš„åŸŸåä¿¡æ¯
+ * ! ²»Ìá¹©Íâ²¿½Ó¿Ú
+ * @brief É¾³ıÒ»¸ö½Úµã
+ * @param domain_name ÒªÉ¾³ıµÄÓòÃûĞÅÏ¢
 */
-static void cache_remove(const char* domain_name) 
+static inline void cache_remove(const char* domain_name)
 {
     _ip_trie.root = delete(_ip_trie.root, domain_name, 0);
 }
 
-
-
-
-
-static PtrTrieNode delete(PtrTrieNode root, const char* key, int len)
+static inline PtrTrieNode delete(PtrTrieNode root, const char* key, int len)
 {
     char c;
     int index;
 
     if (root == NULL)   return NULL;
-    if (len  == strlen(key)) {
+    if (len == strlen(key)) {
         if (root->ip_list) {
             list_free(&root->ip_list);
             _ip_trie.size--;
         }
-        
-        if (noChildren(root)) {
+
+        if (no_children(root)) {
             free(root);
             root = NULL;
         }
@@ -286,13 +349,13 @@ static PtrTrieNode delete(PtrTrieNode root, const char* key, int len)
     }
 
     c = key[len];
-    index = GET_INDEX(c);
+    index = get_idx(c);
 
-    // å·¦å€¼å’Œå‡½æ•°ç¬¬ä¸€ä¸ªå‚æ•°ç›¸åŒ, å‡½æ•°å¯¹å‚æ•°çš„ä¿®æ”¹é€šè¿‡è¿”å›å€¼èµ‹ç»™äº†è‡ªèº«
-    // è¿™æ ·çš„åšæ³•é¿å…äº†å¤æ‚çš„äºŒçº§æŒ‡é’ˆæ“ä½œ
+    // ×óÖµºÍº¯ÊıµÚÒ»¸ö²ÎÊıÏàÍ¬, º¯Êı¶Ô²ÎÊıµÄĞŞ¸ÄÍ¨¹ı·µ»ØÖµ¸³¸øÁË×ÔÉí
+    // ÕâÑùµÄ×ö·¨±ÜÃâÁË¸´ÔÓµÄ¶ş¼¶Ö¸Õë²Ù×÷
     root->children[index] = delete(root->children[index], key, len + 1);
 
-    if (noChildren(root) && root->ip_list == NULL) {
+    if (no_children(root) && root->ip_list == NULL) {
         free(root);
         root = NULL;
     }
@@ -301,11 +364,24 @@ static PtrTrieNode delete(PtrTrieNode root, const char* key, int len)
 }
 
 
+
 /**
- * @brief é‡Šæ”¾é“¾è¡¨
- * @param plist æŒ‡å‘é“¾è¡¨çš„æŒ‡é’ˆ
+ * @brief ÅĞ¶Ï½ÚµãÊÇ·ñÓĞº¢×Ó, ¼´ÊÇ·ñÓĞÓòÃûÒÔ¸Ã½Úµãµ½¸ùµÄÂ·¾¶×Ö·û´®ÎªÇ°×º
+ * @param pnode Ò»¸öÖ¸Ïò TrieNode µÄÖ¸Õë
+ * @return ÓĞº¢×Ó·µ»Ø false, Ã»º¢×Ó·µ»Ø true
 */
-static void list_free(IPListNode** plist)
+static inline bool no_children(PtrTrieNode pnode)
+{
+    for (int i = 0; i < ALPHABET_SIZE; i++)
+        if (pnode->children[i])     return false;
+    return true;
+}
+
+/**
+ * @brief ÊÍ·ÅÁ´±í
+ * @param plist Ö¸ÏòÁ´±íµÄÖ¸Õë
+*/
+static inline void list_free(IPListNode** plist)
 {
     IPListNode* pnode;
 
@@ -314,48 +390,4 @@ static void list_free(IPListNode** plist)
         *plist = pnode->next;
         free(pnode);
     }
-}
-
-
-
-
-/**
- * @brief  è¿”å›ç¼“å­˜çš„å¤§å°
- * @return ç¼“å­˜çš„å¤§å°    
-*/
-int cache_size() {
-    WaitForSingleObject(get_cache_mutex(), INFINITE);
-    int ret;
-    ret = _ip_trie.size;
-    ReleaseMutex(get_cache_mutex());
-    return ret;
-}
-
-
-/**
- * @brief åˆ¤æ–­èŠ‚ç‚¹æ˜¯å¦æœ‰å­©å­, å³æ˜¯å¦æœ‰åŸŸåä»¥è¯¥èŠ‚ç‚¹åˆ°æ ¹çš„è·¯å¾„å­—ç¬¦ä¸²ä¸ºå‰ç¼€
- * @param pnode ä¸€ä¸ªæŒ‡å‘ TrieNode çš„æŒ‡é’ˆ
- * @return æœ‰å­©å­è¿”å› false, æ²¡å­©å­è¿”å› true                           
-*/
-static bool noChildren(PtrTrieNode pnode)
-{
-    for (int i = 0; i < ALPHABET_SIZE; i++)
-        if (pnode->children[i])     return false;
-    return true;
-}
-
-
-
-/**
- * @brief malloc è¾…åŠ©å‡½æ•°
- * @param size ç”³è¯·çš„ç©ºé—´å¤§å°
- * @return ç”³è¯·åˆ°çš„å†…å­˜ç©ºé—´çš„åœ°å€
-*/
-static void* Malloc(unsigned long long size)
-{
-    void* p = malloc(size);
-    if (p == NULL) {
-        log_error_message("cache.c: Malloc()");
-    }
-    return p;
 }

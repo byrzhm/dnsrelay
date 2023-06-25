@@ -1,19 +1,23 @@
 #pragma once
 
 /**
- * todo: ç®¡ç† windows çº¿ç¨‹æ± 
+ * todo: ¹ÜÀí windows Ïß³Ì³Ø
 */
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define BUF_SIZE 1024
+
+
+#include "common.h"
 
 #define ID_ARRAY_SIZE 8
 
-#include <WinSock2.h>
+#ifdef _WIN32
 
+#include <WinSock2.h>
+#include <Windows.h>
 
 typedef struct _PER_HANDLE_DATA {
     struct sockaddr_in sock_addr;
@@ -24,12 +28,10 @@ typedef struct _PER_IO_DATA {
     char buffer[BUF_SIZE];
 } PER_IO_DATA, * LPPER_IO_DATA;
 
-
-
 typedef struct _IDListNode {
     struct _IDListNode *next;
-    /// @brief ids çš„é«˜16ä½ä¸º ä¸å¤–éƒ¨DNSæœåŠ¡å™¨ä¹‹é—´çš„DNSäº‹åŠ¡
-    /// @brief ids çš„ä½16ä½ä¸º ä¸DNSå®¢æˆ·ç«¯ä¹‹é—´çš„DNSäº‹åŠ¡ID
+    /// @brief ids µÄ¸ß16Î»Îª ÓëÍâ²¿DNS·şÎñÆ÷Ö®¼äµÄDNSÊÂÎñ
+    /// @brief ids µÄµÍ16Î»Îª ÓëDNS¿Í»§¶ËÖ®¼äµÄDNSÊÂÎñID
     unsigned id_pair_array[ID_ARRAY_SIZE];
     struct sockaddr_in client_addr[ID_ARRAY_SIZE];
     int size;
@@ -44,64 +46,58 @@ typedef struct _IDList {
 
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _com_port
 */
 HANDLE get_com_port();
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _stdout_mutex
 */
 HANDLE get_stdout_mutex();
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _relay_sock_mutex
 */
 HANDLE get_relay_sock_mutex();
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _cache_mutex
 */
 HANDLE get_cache_mutex();
 
 /**
- * @brief åˆ›å»ºçº¿ç¨‹, åˆ›å»ºmutex, ç»´æŠ¤IDè½¬æ¢è¡¨
+ * @brief ´´½¨Ïß³Ì, ´´½¨mutex, Î¬»¤ID×ª»»±í
 */
 void thread_init();
-
-
-/**
- * @brief åˆ›å»ºçº¿ç¨‹çš„åˆå§‹è¿è¡Œä½ç½®
- * @param lpComPort IOå®Œæˆç«¯å£
- * @return çº¿ç¨‹è¿”å›å€¼: 0 ä¸ºæ­£å¸¸, å…¶ä»–ä¸ºå¼‚å¸¸
-*/
-unsigned WINAPI thread_main(LPVOID lpComPort);
 
 
 #define ID_NOT_FOUND     -1
 #define ID_ALREADY_EXIST -2
 
 /**
- * @brief   ä¼ å…¥QR, flagä¿¡æ¯, æŸ¥è¯¢ç›®æ ‡id
- * @param   target_id è¦æŸ¥æ‰¾çš„id
- * @param   QR        QR=0, æŸ¥æ‰¾ä½ä½; QR=1, æŸ¥æ‰¾é«˜ä½
- * @param   flag      flag=0, ä¸ºæŸ¥é‡è€ŒæŸ¥æ‰¾, ä¸åˆ é™¤; flag=1, æ‰¾åˆ°idå, è¿”å›å…¶å¯¹åº”id, å¹¶åˆ é™¤
- * @param   ptr_addr  è‹¥ä¼ å…¥NULLä¸å¤„ç†, å…¶ä»–æƒ…å†µè¿”å›idå¯¹åº”çš„DNSå®¢æˆ·å¥—æ¥å­—åœ°å€
- * @return  ALREADY_EXIST IDå·²ç»å­˜åœ¨, ID_NOT_FOUNDæœªæ‰¾åˆ°, æˆåŠŸåˆ™è¿”å›å¯¹åº”çš„id >=0 
+ * @brief   ´«ÈëQR, flagĞÅÏ¢, ²éÑ¯Ä¿±êid
+ * @param   target_id Òª²éÕÒµÄid
+ * @param   QR        QR=0, ²éÕÒµÍÎ»; QR=1, ²éÕÒ¸ßÎ»
+ * @param   flag      flag=0, Îª²éÖØ¶ø²éÕÒ, ²»É¾³ı; flag=1, ÕÒµ½idºó, ·µ»ØÆä¶ÔÓ¦id, ²¢É¾³ı
+ * @param   ptr_addr  Èô´«ÈëNULL²»´¦Àí, ÆäËûÇé¿ö·µ»Øid¶ÔÓ¦µÄDNS¿Í»§Ì×½Ó×ÖµØÖ·
+ * @return  ALREADY_EXIST IDÒÑ¾­´æÔÚ, ID_NOT_FOUNDÎ´ÕÒµ½, ³É¹¦Ôò·µ»Ø¶ÔÓ¦µÄid >=0 
  */
 int id_search(unsigned short target_id, int QR, int flag, SOCKADDR_IN *ptr_addr);
 
 /**
- * @brief æ’å…¥id_pair
- * @param id_pair  è¦æ’å…¥çš„id_pair
- * @param ptr_addr è¦æ’å…¥çš„å¥—æ¥å­—åœ°å€ä¿¡æ¯
+ * @brief ²åÈëid_pair
+ * @param id_pair  Òª²åÈëµÄid_pair
+ * @param ptr_addr Òª²åÈëµÄÌ×½Ó×ÖµØÖ·ĞÅÏ¢
 */
 void id_insert(unsigned id_pair, struct sockaddr_in* ptr_addr);
 
 #define MAKE_ID_PAIR(x, y) (((x) << 16) ^ (y))
+
+#endif
 
 #ifdef __cplusplus
 }
