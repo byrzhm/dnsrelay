@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * todo: dnsrelay æ¥å£, ç¨‹åºä¸»ä½“éƒ¨åˆ†
+ * todo: dnsrelay ½Ó¿Ú, ³ÌĞòÖ÷Ìå²¿·Ö
 */
 
 
@@ -10,30 +10,17 @@ extern "C" {
 #endif
 
 /**
- * @fn åˆ›å»ºçº¿ç¨‹, å¥—æ¥å­—, è¯»å–é…ç½®æ–‡ä»¶
- * @brief ä¸­ç»§æœåŠ¡å™¨çš„åˆå§‹åŒ–
- * @param argc å‘½ä»¤è¡Œå‚æ•°ä¸ªæ•°
- * @param argv å‘½ä»¤è¡Œå‚æ•°æ•°ç»„
+ * @fn ´´½¨Ïß³Ì, Ì×½Ó×Ö, ¶ÁÈ¡ÅäÖÃÎÄ¼ş
+ * @brief ÖĞ¼Ì·şÎñÆ÷µÄ³õÊ¼»¯
+ * @param argc ÃüÁîĞĞ²ÎÊı¸öÊı
+ * @param argv ÃüÁîĞĞ²ÎÊıÊı×é
 */
 void dnsrelay_init(int argc, const char *argv[]);
 
 
-/**
- * @brief åˆ†æå‘½ä»¤è¡Œå‚æ•°
- * ! ./dnsrelay [-d/-dd] [dns-server-ipaddr] [filename]
- * @param argc å‘½ä»¤è¡Œå‚æ•°ä¸ªæ•°
- * @param argv å‘½ä»¤è¡Œå‚æ•°æ•°ç»„
-*
- * å¦‚æœæœ‰å¯¹åº”çš„å‘½ä»¤è¡Œå‚æ•°ä¿¡æ¯
- * è°ƒç”¨ log_set_level() è®¾ç½®debugç­‰çº§
- * è°ƒç”¨ sock_set_servaddr() è®¾ç½®å¤–éƒ¨DNSæœåŠ¡å™¨çš„sockaddrä¿¡æ¯
- * è°ƒç”¨ config_set_filepath() è®¾ç½®é…ç½®æ–‡ä»¶è·¯å¾„
-*/
-void parse_args(int argc, const char* argv[]);
-
 
 /**
- * @brief ç¨‹åºä¸»å¾ªç¯
+ * @brief ³ÌĞòÖ÷Ñ­»·
 */
 void main_loop();
 

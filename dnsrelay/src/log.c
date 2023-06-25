@@ -7,149 +7,293 @@
 #endif
 
 #include "log.h"
+#include "thread.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 #include <WinSock2.h>
 #include <Windows.h>
 
-/// @brief é™æ€å˜é‡å­˜å‚¨debugç­‰çº§
-static debug_level _level;
+/// @brief ¾²Ì¬±äÁ¿´æ´¢debugµÈ¼¶
+static debug_level _db_level;
+static int _packet_cnt;
 
+static inline void log_packet_raw(const char* packet, int packet_len);
+static inline void log_packet_brief_info(
+    struct sockaddr_in* sock_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+);
+static inline void log_packet_detailed_info(
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+);
+static inline void print_space();
+static inline void print_header_info(DNS_HEADER* ptr_dns_header);
 
 /**
- * @brief è®¾ç½®debugç­‰çº§
+ * @brief ÉèÖÃdebugµÈ¼¶
 */
-void log_set_level(debug_level level) {
-    _level = level;
+void log_set_db_level(debug_level db_level) {
+    _db_level = db_level;
 }
 
 
-
 /**
- * @brief è¾“å‡ºå¹¶å¤„ç†è¿è¡Œæ—¶é”™è¯¯
+ * @brief Êä³ö²¢´¦ÀíÔËĞĞÊ±´íÎó
 */
 void log_error_message(const char *message) {
-    fprintf(stderr, "[ERROR]: %s %u\n", message, GetLastError());
+    fprintf(stderr, "[ERROR %u]: %s\n", GetLastError(), message);
     exit(1);
 }
 
 
-
 /**
- * @brief å°†åŒ…çš„æ—¶é—´åæ ‡, åºå·, å®¢æˆ·ç«¯IPåœ°å€, æŸ¥è¯¢çš„åŸŸåè¾“å‡º
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö°üµÄĞÅÏ¢
+ * @param packet           DNS±¨ÎÄ
+ * @param packet_len       DNS±¨ÎÄ×Ö½ÚÊı
+ * @param sock_addr        DNS±¨ÎÄ·¢ËÍ·½µÄÌ×½Ó×ÖµØÖ·
+ * @param ptr_packet_info  ±¨ÎÄĞÅÏ¢
+ * @param ptr_dns_header   DNSÍ·²¿ĞÅÏ¢
 */
-void log_packet_brief_info()
-{
-
-}
-
-
-
-/**
- * @brief è¾“å‡ºåŒ…çš„è¯¦ç»†ä¿¡æ¯
- * @param packet           DNSæŠ¥æ–‡
- * @param packet_len       DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param ptr_packet_info  æŠ¥æ–‡ä¿¡æ¯
- * @param ptr_dns_header   DNSå¤´éƒ¨ä¿¡æ¯
-*/
-void log_packet_detailed_info(
-    const char *packet,
+void log_received_query_packet(
+    const char* packet,
     int packet_len,
+    struct sockaddr_in* sock_addr,
     PACKET_INFO* ptr_packet_info,
     DNS_HEADER* ptr_dns_header
 )
 {
-    int i;
-    unsigned char* ptr;
-    int count;
-    struct sockaddr_in temp_addr;
-
-    memset(&temp_addr, 0, sizeof(temp_addr));
-    temp_addr.sin_addr.s_addr = ptr_packet_info->ip_addr;
-
-    ptr = packet;
-    count = 0;
-    WaitForSingleObject(get_stdout_mutex(), INFINITE);
-    
-    printf("\n\n\n");
-
-    printf("%s", asctime(localtime(&ptr_packet_info->current_time)));
-    printf("Transaction ID: %#x\n", ptr_packet_info->id);
-    printf("Src: %s\n", inet_ntoa(temp_addr.sin_addr));
-    printf("\t%s\n\n", ptr_packet_info->domain_name);
-
-    for (int i = 0; i < packet_len; i++) {
-        printf("%.2x ", ptr[i]);
-        ++count;
-        if (count % 16 == 0)
-            putc('\n', stdout);
-        else if (count % 8 == 0)
-            printf("   ");
+    if (_db_level == DEBUG_LEVEL_1) {
+        WaitForSingleObject(get_stdout_mutex(), INFINITE);
+        log_packet_brief_info(sock_addr, ptr_packet_info, ptr_dns_header);
+        ReleaseMutex(get_stdout_mutex());
     }
-    putc('\n', stdout);
-    
-    count = 0;
-    for (int i = 0; i < packet_len; i++) {
-        if ((ptr[i] >= 'a' && ptr[i] <= 'z') || (ptr[i] >= 'A' && ptr[i] <= 'Z'))
-            printf("%c  ", ptr[i]);
-        else 
-            printf(".  ");
-        ++count;
-        if (count % 16 == 0)
-            putc('\n', stdout);
-        else if (count % 8 == 0)
-            printf("   ");
+    else if (_db_level == DEBUG_LEVEL_2) {
+        // ÔÚsendÍê³ÉÖ®ºó²Å¿ÉÒÔrelease
+        WaitForSingleObject(get_stdout_mutex(), INFINITE);
+        printf("RECV from %s:%u (%d bytes)\n", 
+            inet_ntoa((*sock_addr).sin_addr), 
+            ntohs((*sock_addr).sin_port), 
+            packet_len
+        );
+        log_packet_raw(packet, packet_len);
+        log_packet_detailed_info(ptr_packet_info, ptr_dns_header);
     }
+}
+
+/**
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö½ÓÊÜµ½µÄDNSÓ¦´ğ±¨ÎÄĞÅÏ¢
+ * @param packet           DNS±¨ÎÄ
+ * @param packet_len       DNS±¨ÎÄ×Ö½ÚÊı
+ * @param client_addr      DNS¿Í»§¶ËµÄÌ×½Ó×ÖµØÖ·
+ * @param serv_addr        DNSÍâ²¿·şÎñÆ÷µÄÌ×½Ó×ÖµØÖ·
+ * @param ptr_dns_header   DNSÍ·²¿ĞÅÏ¢
+ * @param origin_id        ×ª»»Ç°µÄID
+*/
+void log_received_response_packet(
+    const char* packet,
+    int packet_len, 
+    struct sockaddr_in * client_addr,
+    struct sockaddr_in * serv_addr,
+    DNS_HEADER* ptr_dns_header, 
+    unsigned short origin_id
+)
+{
+    if (_db_level == DEBUG_LEVEL_2) {
+        WaitForSingleObject(get_stdout_mutex(), INFINITE);
+        printf("RECV from %s:%u (%d bytes)\n",
+            inet_ntoa((*serv_addr).sin_addr),
+            ntohs((*serv_addr).sin_port),
+            packet_len
+        );
+        log_packet_raw(packet, packet_len);
+        print_header_info(ptr_dns_header);
+        printf("SEND to %s:%u (%d bytes) [ID %x -> %x]\n",
+            inet_ntoa((*client_addr).sin_addr),
+            ntohs((*client_addr).sin_port),
+            packet_len,
+            ptr_dns_header->id,
+            origin_id
+        );
+        ReleaseMutex(get_stdout_mutex());
+    }
+}
+
+/**
+ * @brief ¸ù¾İdebugµÈ¼¶Êä³ö·¢ËÍµÄDNS±¨ÎÄĞÅÏ¢
+ * @param to_addr           Ä¿µÄµØµÄÌ×½Ó×ÖµØÖ·
+ * @param send_bytes        ·¢ËÍµÄ×Ö½ÚÊı
+ * @param old_id            ¾ÉµÄID
+ * @param new_id            ×ª»»ºóµÄĞÂID
+*/
+void log_packet_sent(struct sockaddr_in* to_addr, int send_bytes, unsigned short old_id, unsigned short new_id)
+{
+    if (_db_level >= DEBUG_LEVEL_2) {
+        printf("SEND to %s:%d (%d bytes) [ID %x->%x]\n",
+            inet_ntoa((*to_addr).sin_addr),
+            ntohs((*to_addr).sin_port),
+            send_bytes, old_id, new_id
+        );
+        ReleaseMutex(get_stdout_mutex());
+    }
+}
+
+
+/**
+* @brief Êä³öÅäÖÃĞÅÏ¢, ÎŞ»¥³âËø(²»ĞèÒª)
+* @param ip_str IP×Ö·û´®
+* @param name   ÓòÃû
+*/
+void log_config_info(int line_cnt, const char* ip_str, const char* name)
+{
+    if (_db_level >= DEBUG_LEVEL_2) {
+        printf("%10d: %s\t%s\n", line_cnt, ip_str, name);
+    }
+}
+
+
+/**
+ * @brief ½«°üµÄÊ±¼ä×ø±ê, ĞòºÅ, ¿Í»§¶ËIPµØÖ·, ²éÑ¯µÄÓòÃûÊä³ö
+*/
+static inline void log_packet_brief_info(
+    struct sockaddr_in* sock_addr,
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+)
+{
     
-    printf("\n\n\n");
-    ReleaseMutex(get_stdout_mutex());
+    int time_str_len;
+    char time_str[50] = "null time";
+    char* temp_ptr = asctime(localtime(&ptr_packet_info->current_time));
+
+    if (temp_ptr != NULL) {
+        strcpy(time_str, temp_ptr);
+        time_str_len = (int)strlen(time_str);
+        if (time_str[time_str_len - 1] == '\n') {
+            time_str[time_str_len - 1] = 0;
+        }
+    }
+
+    if (!(ptr_dns_header->flags & 0x8000 >> 15)) {
+        // query
+        printf("%2d:  %s    Client %s    %s, TYPE %d, CLASS %d\n",
+            _packet_cnt++,
+            time_str,
+            inet_ntoa((*sock_addr).sin_addr),
+            ptr_packet_info->domain_name,
+            ptr_packet_info->type,
+            ptr_packet_info->class
+        );
+    }
 }
 
 
 
 /**
- * @brief ä¸åŠ ä»»ä½•è§£æ, ä»¥åå…­è¿›åˆ¶ä¸å­—ç¬¦å½¢å¼æ˜¾ç¤ºåŒ…çš„äºŒè¿›åˆ¶ä¿¡æ¯
- * @param packet     æŒ‡å‘åŒ…çš„å­—ç¬¦æŒ‡é’ˆ
- * @param packet_len åŒ…çš„å­—èŠ‚æ•°
+ * @brief Êä³ö°üµÄÏêÏ¸ĞÅÏ¢
+ * @param ptr_packet_info  ±¨ÎÄĞÅÏ¢
+ * @param ptr_dns_header   DNSÍ·²¿ĞÅÏ¢
 */
-void log_packet_raw(const char *packet, int packet_len)
+static inline void log_packet_detailed_info(
+    PACKET_INFO* ptr_packet_info,
+    DNS_HEADER* ptr_dns_header
+)
+{
+    int time_str_len;
+    char time_str[50] = "null time";
+    struct sockaddr_in temp_addr;
+    char* temp_ptr = asctime(localtime(&ptr_packet_info->current_time));
+
+    if (temp_ptr != NULL) {
+        strcpy(time_str, temp_ptr);
+        time_str_len = (int)strlen(time_str);
+        if (time_str[time_str_len - 1] == '\n') {
+            time_str[time_str_len - 1] = 0;
+        }
+    }
+
+    memset(&temp_addr, 0, sizeof(temp_addr));
+    temp_addr.sin_addr.s_addr = ptr_packet_info->ip_addr;
+
+    print_header_info(ptr_dns_header);
+
+    printf("%2d:  %s    Client %s    %s, TYPE %d, CLASS %d\n",
+        _packet_cnt++,
+        time_str,
+        inet_ntoa(temp_addr.sin_addr),
+        ptr_packet_info->domain_name,
+        ptr_packet_info->type,
+        ptr_packet_info->class
+    );
+}
+
+
+/**
+ * @brief ²»¼ÓÈÎºÎ½âÎö, ÒÔÊ®Áù½øÖÆÓë×Ö·ûĞÎÊ½ÏÔÊ¾°üµÄ¶ş½øÖÆĞÅÏ¢
+ * @param packet     Ö¸Ïò°üµÄ×Ö·ûÖ¸Õë
+ * @param packet_len °üµÄ×Ö½ÚÊı
+*/
+static inline void log_packet_raw(const char* packet, int packet_len)
 {
     int i;
-    unsigned char* ptr;
-    int count;
+    const unsigned char* ptr = packet;
 
-
-    ptr = packet;
-    count = 0;
-    
-    WaitForSingleObject(get_stdout_mutex(), INFINITE);
-    
-    printf("\n\n\n");
-    
-    for (int i = 0; i < packet_len; i++) {
+    for (i = 0; i < packet_len; i++) {
+        if (i % 16 == 0)
+            print_space();
         printf("%.2x ", ptr[i]);
-        ++count;
-        if (count % 16 == 0)
-            putc('\n', stdout);
-        else if (count % 8 == 0)
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+        else if ((i + 1) % 8 == 0)
             printf("   ");
     }
-    putc('\n', stdout);
-    
-    count = 0;
-    for (int i = 0; i < packet_len; i++) {
+
+    if (packet_len % 16 != 0)
+        printf("\n");
+
+    for (i = 0; i < packet_len; i++) {
+        if (i % 16 == 0)
+            print_space();
+
         if ((ptr[i] >= 'a' && ptr[i] <= 'z') || (ptr[i] >= 'A' && ptr[i] <= 'Z'))
             printf("%c  ", ptr[i]);
         else
             printf(".  ");
-        ++count;
-        if (count % 16 == 0)
-            putc('\n', stdout);
-        else if (count % 8 == 0)
+
+        if ((i + 1) % 16 == 0)
+            printf("\n");
+        else if ((i + 1) % 8 == 0)
             printf("   ");
     }
-    
-    printf("\n\n\n");
-    ReleaseMutex(get_stdout_mutex());
+
+    if (packet_len % 16 != 0)
+        printf("\n");
+}
+
+static inline void print_space() { printf("        "); }
+
+static inline void print_header_info(DNS_HEADER* ptr_dns_header)
+{
+    printf("      "
+        "ID %x, QR %d, OPCODE %d, AA %d, TC %d, RD %d, RA %d, Z %d, AD %d, CD %d, RCODE %d\n"
+        "      "
+        "QDCOUNT %d, ANCOUNT %d, NSCOUNT %d, ARCOUNT %d\n",
+        (ptr_dns_header->id),                       // ID
+        (ptr_dns_header->flags & 0x8000) >> 15,     // QR
+        (ptr_dns_header->flags & 0x7800) >> 11,     // OPCODE
+        (ptr_dns_header->flags & 0x0400) >> 10,     // AA
+        (ptr_dns_header->flags & 0x0200) >> 9,      // TC
+        (ptr_dns_header->flags & 0x0100) >> 8,      // RD
+        (ptr_dns_header->flags & 0x0080) >> 7,      // RA
+        (ptr_dns_header->flags & 0x0040) >> 6,      // Z
+        (ptr_dns_header->flags & 0x0020) >> 5,      // AD
+        (ptr_dns_header->flags & 0x0010) >> 4,      // CD
+        (ptr_dns_header->flags & 0x000F),           // RCODE
+        (ptr_dns_header->question_count),           // QDCOUNT
+        (ptr_dns_header->answer_count),             // ANCOUNT
+        (ptr_dns_header->authority_count),          // NSCOUNT
+        (ptr_dns_header->additional_count)          // ARCOUNT
+    );
 }

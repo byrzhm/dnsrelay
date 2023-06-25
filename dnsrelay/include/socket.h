@@ -1,7 +1,7 @@
 #pragma once
 
 /**
- * todo: ç®¡ç†å¥—æ¥å­—
+ * todo: ¹ÜÀíÌ×½Ó×Ö
 */
 
 #ifdef __cplusplus
@@ -13,51 +13,38 @@ extern "C" {
 #include <Windows.h>
 
 /**
- * @brief  å‘å¤–éƒ¨æä¾›è·å–é™æ€å˜é‡_relay_sockçš„æ¥å£
+ * @brief  ÏòÍâ²¿Ìá¹©»ñÈ¡¾²Ì¬±äÁ¿_relay_sockµÄ½Ó¿Ú
  * @return _relay_sock
 */
 SOCKET get_relay_sock();
 
-
-/// @brief åˆå§‹åŒ–å¥—æ¥å­—ä¿¡æ¯
+/// @brief ³õÊ¼»¯Ì×½Ó×ÖĞÅÏ¢
 void sock_init();
 
-
 /**
- * @brief è®¾ç½®å¤–éƒ¨DNSæœåŠ¡å™¨åœ°å€
- * @param serv_ip å¤–éƒ¨DNSæœåŠ¡å™¨ipåœ°å€å­—ç¬¦ä¸²
+ * @brief ÉèÖÃÍâ²¿DNS·şÎñÆ÷µØÖ·
+ * @param serv_ip Íâ²¿DNS·şÎñÆ÷ipµØÖ·×Ö·û´®
 */
-void set_serv_addr(const char *serv_ip);
-
+void sock_set_serv_ip(const char *serv_ip);
 
 /**
- * @brief è°ƒç”¨recvfromæ¥å—å‘æ¥çš„DNSæŠ¥æ–‡, 
- *        è°ƒç”¨PostQueuedCompletionStatus()å”¤é†’çº¿ç¨‹å¤„ç†DNSæŠ¥æ–‡
- * @param handle_ptr å·²ç»åˆ†é…å¥½ç©ºé—´çš„æŒ‡å‘PER_HANDLE_DATAçš„æŒ‡é’ˆ
- * @param io_ptr     å·²ç»åˆ†é…å¥½ç©ºé—´çš„æŒ‡å‘PER_IO_DATAçš„æŒ‡é’ˆ
- * ! [æ³¨æ„] io_ptr->overlapped åœ¨ä¼ å…¥å‰å¿…é¡»ç½®é›¶
- * @param recv_sock  æ¥å—æŠ¥æ–‡çš„å¥—æ¥å­—ä¿¡æ¯
+ * @brief µ÷ÓÃrecvfrom½ÓÊÜ·¢À´µÄDNS±¨ÎÄ, 
+ *        µ÷ÓÃPostQueuedCompletionStatus()»½ĞÑÏß³Ì´¦ÀíDNS±¨ÎÄ
+ * @param handle_ptr ÒÑ¾­·ÖÅäºÃ¿Õ¼äµÄÖ¸ÏòPER_HANDLE_DATAµÄÖ¸Õë
+ * @param io_ptr     ÒÑ¾­·ÖÅäºÃ¿Õ¼äµÄÖ¸ÏòPER_IO_DATAµÄÖ¸Õë
+ * ! [×¢Òâ] io_ptr->overlapped ÔÚ´«ÈëÇ°±ØĞëÖÃÁã
+ * @param recv_sock  ½ÓÊÜ±¨ÎÄµÄÌ×½Ó×ÖĞÅÏ¢
 */ 
 void recv_packet(void *handle_ptr, void *io_ptr, SOCKET recv_sock);
 
 
 /**
- * @brief å‘é€DNSæŠ¥æ–‡
- * @param packet      æŒ‡å‘è¦å‘é€çš„æ•°æ®åŒ…çš„æŒ‡é’ˆ
- * @param send_len    è¦å‘é€çš„å­—èŠ‚æ•°
- * @param ptr_to_addr è¦å‘é€çš„ipåœ°å€
-*/
-void relay_packet(const char* packet, int send_len, SOCKADDR_IN* ptr_to_addr);
-
-
-
-/**
- * @brief åˆ†æå‘æ¥çš„DNSæŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  sock_addr         æŠ¥æ–‡å‘é€æ–¹çš„ä¿¡æ¯
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ [æŒ‡é’ˆè¿”å›]
+ * @brief ·ÖÎö·¢À´µÄDNS±¨ÎÄ
+ * @param  packet            ½ÓÊÜµÄDNS±¨ÎÄ
+ * @param  packet_len        ½ÓÊÜµÄDNS±¨ÎÄ×Ö½ÚÊı
+ * @param  sock_addr         ±¨ÎÄ·¢ËÍ·½µÄĞÅÏ¢
+ * @param  ptr_packet_info   Ö¸Ïò±¨ÎÄĞÅÏ¢µÄÖ¸Õë    [Ö¸Õë·µ»Ø]
+ * @param  ptr_dns_header    Ö¸ÏòDNSÍ·²¿ĞÅÏ¢µÄÖ¸Õë [Ö¸Õë·µ»Ø]
  */
 void parse_packet(
     const char *packet,
@@ -66,45 +53,6 @@ void parse_packet(
     PACKET_INFO *ptr_packet_info,
     DNS_HEADER *ptr_dns_header
 );
-
-
-
-/**
- * @brief åˆ†æè¯·æ±‚æŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  sock_addr         æŠ¥æ–‡å‘é€æ–¹çš„ä¿¡æ¯
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ 
- */
-void parse_query(
-    const char* packet,
-    int packet_len,
-    struct sockaddr_in* sock_addr,
-    PACKET_INFO* ptr_packet_info,
-    DNS_HEADER* ptr_dns_header
-);
-
-/**
- * @brief åˆ†æå›åº”æŠ¥æ–‡
- * @param  packet            æ¥å—çš„DNSæŠ¥æ–‡
- * @param  packet_len        æ¥å—çš„DNSæŠ¥æ–‡å­—èŠ‚æ•°
- * @param  ptr_packet_info   æŒ‡å‘æŠ¥æ–‡ä¿¡æ¯çš„æŒ‡é’ˆ    [æŒ‡é’ˆè¿”å›]
- * @param  ptr_dns_header    æŒ‡å‘DNSå¤´éƒ¨ä¿¡æ¯çš„æŒ‡é’ˆ 
- */
-void parse_response(
-    const char* packet,
-    int packet_len,
-    PACKET_INFO* ptr_packet_info,
-    DNS_HEADER* ptr_dns_header
-);
-
-#ifdef _DEBUG
-/**
- * @brief echo æµ‹è¯•
-*/
-void send_packet_test(const char* message, int send_len, SOCKADDR_IN* ptr_to_addr);
-#endif
 
 #ifdef __cplusplus
 }

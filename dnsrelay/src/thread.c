@@ -8,32 +8,30 @@
 #include <windows.h>
 #include <process.h>
 
-static HANDLE _com_port;         // IOå®Œæˆç«¯å£
-static HANDLE _stdout_mutex;     // è¾“å‡ºäº’æ–¥é”
-static HANDLE _cache_mutex;      // cacheäº’æ–¥é”
-static HANDLE _id_list_mutex;    // IDè½¬æ¢è¡¨äº’æ–¥é”
-static HANDLE _relay_sock_mutex; // relay_sockäº’æ–¥é” ?
+static HANDLE _com_port;         // IOÍê³É¶Ë¿Ú
+static HANDLE _stdout_mutex;     // Êä³ö»¥³âËø
+static HANDLE _cache_mutex;      // cache»¥³âËø
+static HANDLE _id_list_mutex;    // ID×ª»»±í»¥³âËø
+static HANDLE _relay_sock_mutex; // relay_sock»¥³âËø ?
 
-static IDList _id_list;          // IDè½¬æ¢è¡¨
+static IDList _id_list;          // ID×ª»»±í
 
 
-/**
- * @brief åˆ›å»ºIDè½¬æ¢è¡¨
-*/
+
 static void build_id_list();
-
+static unsigned WINAPI thread_main(LPVOID lpComPort);
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _com_port
 */
-HANDLE get_com_port() 
+HANDLE get_com_port()
 {
     return _com_port;
 }
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _stdout_mutex
 */
 HANDLE get_stdout_mutex()
@@ -43,7 +41,7 @@ HANDLE get_stdout_mutex()
 
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _relay_sock_mutex
 */
 HANDLE get_relay_sock_mutex()
@@ -53,7 +51,7 @@ HANDLE get_relay_sock_mutex()
 
 
 /**
- * @brief æä¾›æ¥å£
+ * @brief Ìá¹©½Ó¿Ú
  * @return _cache_mutex
 */
 HANDLE get_cache_mutex()
@@ -63,98 +61,83 @@ HANDLE get_cache_mutex()
 
 
 /**
- * @brief åˆ›å»ºIOCP, åˆ›å»ºçº¿ç¨‹, åˆ›å»ºmutex, åˆ›å»ºIDè½¬æ¢è¡¨
+ * @brief ´´½¨IOCP, ´´½¨Ïß³Ì, ´´½¨mutex, ´´½¨ID×ª»»±í
 */
 void thread_init()
 {
-    int i;
+    unsigned i;
     SYSTEM_INFO sys_info;
 
-    // åˆ›å»º IO å®Œæˆç«¯å£
+    // ´´½¨ IO Íê³É¶Ë¿Ú
     _com_port = CreateIoCompletionPort(
         INVALID_HANDLE_VALUE, NULL, 0, 0
     );
 
-    if (_com_port == NULL) 
+    if (_com_port == NULL)
         log_error_message("thread_init(): CreateIoCompletionPort()");
     else {
-        // åˆ›å»ºçº¿ç¨‹
+        // ´´½¨Ïß³Ì
         GetSystemInfo(&sys_info);
         for (i = 0;
 #ifdef _DEBUG
-            i < sys_info.dwNumberOfProcessors;
+            i < 2;
 #else
             i < 2 * sys_info.dwNumberOfProcessors;
 #endif
             i++)
             _beginthreadex(NULL, 0, thread_main,
-                         (LPVOID)_com_port, 0, NULL);
+                (LPVOID)_com_port, 0, NULL);
     }
 
-    // åˆ›å»º mutex
-    _stdout_mutex     = CreateMutex(NULL, FALSE, NULL);
-    _cache_mutex      = CreateMutex(NULL, FALSE, NULL);
-    _id_list_mutex    = CreateMutex(NULL, FALSE, NULL);
+    // ´´½¨ mutex
+    _stdout_mutex = CreateMutex(NULL, FALSE, NULL);
+    _cache_mutex = CreateMutex(NULL, FALSE, NULL);
+    _id_list_mutex = CreateMutex(NULL, FALSE, NULL);
     _relay_sock_mutex = CreateMutex(NULL, FALSE, NULL);
 
-    if (_stdout_mutex == NULL 
+    if (_stdout_mutex == NULL
         || _cache_mutex == NULL
-        || _id_list_mutex == NULL 
-        || _relay_sock_mutex == NULL
-        )
+        || _id_list_mutex == NULL
+        || _relay_sock_mutex == NULL)
         log_error_message("thread_init(): CreateMutex()");
 
-    // åˆ›å»ºIDè½¬æ¢è¡¨
+    // ´´½¨ID×ª»»±í
     build_id_list();
 }
 
 
 /**
- * @brief åˆ›å»ºçº¿ç¨‹çš„åˆå§‹è¿è¡Œä½ç½®
- * @param lpComPort IOå®Œæˆç«¯å£
- * @return çº¿ç¨‹è¿”å›å€¼: 0 ä¸ºæ­£å¸¸, å…¶ä»–ä¸ºå¼‚å¸¸
+ * @brief ´´½¨Ïß³ÌµÄ³õÊ¼ÔËĞĞÎ»ÖÃ
+ * @param lpComPort IOÍê³É¶Ë¿Ú
+ * @return Ïß³Ì·µ»ØÖµ: 0 ÎªÕı³£, ÆäËûÎªÒì³£
 */
-unsigned WINAPI thread_main(LPVOID lpComPort)
+static unsigned WINAPI thread_main(LPVOID lpComPort)
 {
     HANDLE hComPort = (HANDLE)lpComPort;
     DWORD recv_bytes;
     LPPER_HANDLE_DATA handle_info;
     LPPER_IO_DATA io_info;
     BOOL bOk;
-    // DWORD dwError;
-    time_t current_time;
     PACKET_INFO packet_info;
     DNS_HEADER dns_header;
 
 
     while (1) {
         // [WARNING] 'GetQueuedCompletionStatus': different types for formal and actual parameter 4
-        // è¿™ä¸ª warning ä¸ç”¨ç®¡, åˆ©ç”¨äº† &PER_IO_DATA == &(PER_IO_DATA.OVERLAPPED), å¯ä»¥çœ‹ PER_IO_DATA çš„ç»“æ„ä½“å£°æ˜
+        // Õâ¸ö warning ¿ÉÒÔºöÂÔ, ÀûÓÃÁË &PER_IO_DATA == &(PER_IO_DATA.OVERLAPPED), ¼û PER_IO_DATA µÄ½á¹¹ÌåÉùÃ÷
         bOk = GetQueuedCompletionStatus(
             hComPort, &recv_bytes, (PULONG_PTR)&handle_info,
             (LPOVERLAPPED*)&io_info, INFINITE
         );
-        // dwError = GetLastError();
 
-        time(&current_time);
-        packet_info.current_time = current_time;
+        packet_info.current_time = time(NULL);
 
         if (!bOk) {
-            if (io_info != NULL) {
-                // Process a failed completed I/O request
-                // dwError contains the reason for failure
                 log_error_message("thread_main(): GetQueuedCompletionStatus()");
-            }
-            else {
-                log_error_message("thread_main(): GetQueuedCompletionStatus()");
-            }
         }
 
         parse_packet(io_info->buffer, recv_bytes, &handle_info->sock_addr, &packet_info, &dns_header);
 
-#ifdef _DEBUG
-        // log_packet_detailed_info(io_info->buffer, recv_bytes, &packet_info, &dns_header);
-#endif
 
         free(handle_info);
         free(io_info);
@@ -164,11 +147,11 @@ unsigned WINAPI thread_main(LPVOID lpComPort)
 }
 
 /**
- * @brief åˆ›å»ºIDè½¬æ¢è¡¨
+ * @brief ´´½¨ID×ª»»±í
 */
 static void build_id_list()
 {
-    IDListNode* ptr = (IDListNode *)malloc(sizeof(IDListNode));
+    IDListNode* ptr = (IDListNode*)malloc(sizeof(IDListNode));
     if (ptr == NULL) {
         log_error_message("build_id_list(): malloc()");
     }
@@ -183,9 +166,9 @@ static void build_id_list()
 
 
 /**
- * @brief åˆ é™¤id_pair
- * @param pnode å¾…åˆ é™¤id_pairçš„èŠ‚ç‚¹åœ°å€
- * @param index å¾…åˆ é™¤id_pairæ‰€åœ¨çš„æ•°ç»„ç´¢å¼•
+ * @brief É¾³ıid_pair
+ * @param pnode ´ıÉ¾³ıid_pairµÄ½ÚµãµØÖ·
+ * @param index ´ıÉ¾³ıid_pairËùÔÚµÄÊı×éË÷Òı
 */
 static void id_remove(IDListNode* pnode, int index)
 {
@@ -199,22 +182,22 @@ static void id_remove(IDListNode* pnode, int index)
 }
 
 /**
- * @brief   ä¼ å…¥QR, flagä¿¡æ¯, æŸ¥è¯¢ç›®æ ‡id
- * @param   target_id è¦æŸ¥æ‰¾çš„id
- * @param   QR        QR=0, æŸ¥æ‰¾ä½ä½; QR=1, æŸ¥æ‰¾é«˜ä½
- * @param   flag      flag=0, ä¸ºæŸ¥é‡è€ŒæŸ¥æ‰¾, ä¸åˆ é™¤; flag=1, æ‰¾åˆ°idå, è¿”å›å…¶å¯¹åº”id, å¹¶åˆ é™¤
- * @param   ptr_addr  è‹¥ä¼ å…¥NULLä¸å¤„ç†, å…¶ä»–æƒ…å†µè¿”å›idå¯¹åº”çš„DNSå®¢æˆ·å¥—æ¥å­—åœ°å€
- * @return  ALREADY_EXIST IDå·²ç»å­˜åœ¨, ID_NOT_FOUNDæœªæ‰¾åˆ°, æˆåŠŸåˆ™è¿”å›å¯¹åº”çš„id >=0 
+ * @brief   ´«ÈëQR, flagĞÅÏ¢, ²éÑ¯Ä¿±êid
+ * @param   target_id Òª²éÕÒµÄid
+ * @param   QR        QR=0, ²éÕÒµÍÎ»; QR=1, ²éÕÒ¸ßÎ»
+ * @param   flag      flag=0, Îª²éÖØ¶ø²éÕÒ, ²»É¾³ı; flag=1, ÕÒµ½idºó, ·µ»ØÆä¶ÔÓ¦id, ²¢É¾³ı
+ * @param   ptr_addr  Èô´«ÈëNULL²»´¦Àí, ÆäËûÇé¿ö·µ»Øid¶ÔÓ¦µÄDNS¿Í»§Ì×½Ó×ÖµØÖ·
+ * @return  ALREADY_EXIST IDÒÑ¾­´æÔÚ, ID_NOT_FOUNDÎ´ÕÒµ½, ³É¹¦Ôò·µ»Ø¶ÔÓ¦µÄid >=0
  */
 int id_search(unsigned short target_id, int QR, int flag, SOCKADDR_IN* ptr_addr)
 {
     int ret = ID_NOT_FOUND;
     int i;
     int found = 0;
-    IDListNode *ptr = _id_list.head;
+    IDListNode* ptr = _id_list.head;
 
     WaitForSingleObject(_id_list_mutex, INFINITE);
-    
+
     while (ptr != NULL && !found) {
         for (i = 0; i < ptr->size && !found;) {
             if (QR == 0) {
@@ -238,7 +221,7 @@ int id_search(unsigned short target_id, int QR, int flag, SOCKADDR_IN* ptr_addr)
         if (!found)
             ptr = ptr->next;
     }
-    
+
     if (found) {
         if (flag == 0) {
             ret = ID_ALREADY_EXIST;
@@ -264,14 +247,14 @@ int id_search(unsigned short target_id, int QR, int flag, SOCKADDR_IN* ptr_addr)
 
 
 /**
- * @brief æ’å…¥id_pair
- * @param id_pair è¦æ’å…¥çš„id_pair
- * @param ptr_addr è¦æ’å…¥çš„å¥—æ¥å­—åœ°å€ä¿¡æ¯
+ * @brief ²åÈëid_pair
+ * @param id_pair Òª²åÈëµÄid_pair
+ * @param ptr_addr Òª²åÈëµÄÌ×½Ó×ÖµØÖ·ĞÅÏ¢
 */
 void id_insert(unsigned id_pair, struct sockaddr_in* ptr_addr)
 {
-    IDListNode *prev = NULL;
-    IDListNode *ptr = _id_list.head;
+    IDListNode* prev = NULL;
+    IDListNode* ptr = _id_list.head;
 
     WaitForSingleObject(_id_list_mutex, INFINITE);
 
@@ -288,9 +271,9 @@ void id_insert(unsigned id_pair, struct sockaddr_in* ptr_addr)
         }
     }
 
-    // ç”³è¯·çš„ç©ºé—´å·²ç»ç”¨å®Œ, å†æ¬¡ç”³è¯·ç©ºé—´
+    // ÉêÇëµÄ¿Õ¼äÒÑ¾­ÓÃÍê, ÔÙ´ÎÉêÇë¿Õ¼ä
     if (ptr == NULL) {
-        IDListNode *temp = (IDListNode *)malloc(sizeof(IDListNode));
+        IDListNode* temp = (IDListNode*)malloc(sizeof(IDListNode));
         if (temp == NULL)
             log_error_message("id_insert(): malloc()");
         else {

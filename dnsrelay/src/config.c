@@ -6,6 +6,7 @@
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
 #endif 
 
+#include "common.h"
 #include "log.h"
 #include "cache.h"
 #include "config.h"
@@ -18,13 +19,11 @@
 #define CONFIG_BUF_SIZE 1024
 
 static FILE *_fp;
-static char *_filepath;
-
-static void* Malloc(unsigned long long size);
+static const char *_filepath;
 
 
 /**
- * @brief è®¾ç½®é…ç½®æ–‡ä»¶çš„è·¯å¾„
+ * @brief ÉèÖÃÅäÖÃÎÄ¼şµÄÂ·¾¶
 */
 void config_set_filepath(const char* filepath) {
     _filepath = filepath;
@@ -33,7 +32,7 @@ void config_set_filepath(const char* filepath) {
 
 
 /**
- * @brief åŠ è½½é…ç½®æ–‡ä»¶ä¿¡æ¯åˆ°cache
+ * @brief ¼ÓÔØÅäÖÃÎÄ¼şĞÅÏ¢µ½cache
 */
 void config_init()
 {
@@ -41,44 +40,33 @@ void config_init()
     char* buf    = (char *)Malloc(sizeof(char) * CONFIG_BUF_SIZE);
     char* name   = (char *)Malloc(sizeof(char) * MAX_DOMAIN_SIZE);
     char* ip_str = (char *)Malloc(sizeof(char) * MAX_IP_STR_SIZE);
+    int line_cnt = 0;
+
     _fp = fopen(_filepath, "r");
     if (!_fp) {
-        log_error_message("config_init()");
+        // ¶ÁÈ¡ÅäÖÃÎÄ¼şÊ§°Ü
+        log_error_message(__FUNCTION__ ":fopen() error!");
     }
     else {
+        printf("Try to load table \"%s\" ... OK\n", _filepath);
+
         while (fgets(buf, CONFIG_BUF_SIZE, _fp) != NULL && !feof(_fp)) {
-            str_len = strlen(buf);
-            if (str_len != 1) {     // in case "\n"
+            str_len = (int)strlen(buf);
+            if (str_len != 1) {     // ·ÀÖ¹Ò»ĞĞÖ»ÓĞ "\n", ¼´¿ÕĞĞ
                 buf[str_len - 1] = 0;
                 str_len--;
-                sscanf(buf, "%s %s", ip_str, name);
-#ifdef _DEBUG
-                printf("%s\n%s\n~~~~~~~~\n", ip_str, name);
-#endif
+                if (sscanf(buf, "%s %s", ip_str, name) != 2)
+                    log_error_message(__FUNCTION__ ": sscanf() failed");
+                
+                log_config_info(++line_cnt, ip_str, name);
                 cache_insert(name, inet_addr(ip_str));
             }
         }
+        printf("%d names, occupy %d bytes memory\n", line_cnt, cache_memory_size());
 
         fclose(_fp);
         free(buf);
         free(name);
         free(ip_str);
     }
-}
-
-
-
-
-/**
- * @brief malloc è¾…åŠ©å‡½æ•°
- * @param size ç”³è¯·çš„ç©ºé—´å¤§å°
- * @return ç”³è¯·åˆ°çš„å†…å­˜ç©ºé—´çš„åœ°å€
-*/
-static void* Malloc(unsigned long long size)
-{
-    void* p = malloc(size);
-    if (p == NULL) {
-        log_error_message("cache.c: Malloc()");
-    }
-    return p;
 }
