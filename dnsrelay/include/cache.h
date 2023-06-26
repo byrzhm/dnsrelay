@@ -18,16 +18,6 @@ extern "C" {
 #define TTL 		  2 * SEC_PER_MIN
 #define INFINITE_TTL  3 * 365 * SEC_PER_DAY
 
-/**
- * @brief 节点种类
- * @param INNER  内部节点
- * @param CONFIG 从配置文件中读取的叶子节点, 不可删除
- * @param NORMAL 程序正常运行过程中产生的正常的叶子结点, 可以删除
-*/
-typedef enum
-{
-	INNER, CONFIG, NORMAL
-} node_type;
 
 /**
  * @brief 节点信息

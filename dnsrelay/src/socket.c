@@ -28,7 +28,6 @@ static uint32_t _serv_ip_addr;
 
 static inline void get_header_info(
     const char* packet,
-    PACKET_INFO* ptr_packet_info,
     DNS_HEADER* ptr_dns_header
 );
 static inline void parse_query_info(const char* packet, char *domain_name, unsigned short* type, unsigned short* class);
@@ -162,7 +161,7 @@ void parse_packet(
     int QR;
 
     ptr_packet_info->ip_addr = sock_addr->sin_addr.s_addr;
-    get_header_info(packet, ptr_packet_info, ptr_dns_header);
+    get_header_info(packet, ptr_dns_header);
 
     QR = (ptr_dns_header->flags & 0x8000) >> 15;
     if (QR == 0) {
@@ -606,13 +605,10 @@ static inline void get_ip_in_answer(const char* ptr, int remain_len, const char*
 /**
  * @brief 分析发来的DNS报文, 获取DNS报文头部信息
  * @param  packet            接受的DNS报文
- * @param  packet_len        接受的DNS报文字节数
- * @param  ptr_packet_info   指向报文信息的指针    [指针返回]
  * @param  ptr_dns_header    指向DNS头部信息的指针 [指针返回]
  */
 static inline void get_header_info(
     const char* packet,
-    PACKET_INFO* ptr_packet_info,
     DNS_HEADER* ptr_dns_header
 )
 {
